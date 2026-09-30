@@ -1,6 +1,7 @@
 //! Herdr driver (§8). Handles are Herdr pane IDs (`w1:p2`).
 
 use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
     env,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -12,7 +13,10 @@ use serde::{Deserialize, de::DeserializeOwned};
 use crate::{
     agents::is_known_kind,
     driver::{Driver, Error, Result, SpawnRequest, SplitRequest},
-    model::{Confidence, Direction, Handle, Status, StatusResult},
+    model::{
+        AgentSession, Confidence, Direction, Handle, PaneRecord,
+        SessionRefKind, Status, StatusResult, WorkspaceRecord,
+    },
     process::{CEILING, output_within},
     text::{shell_join, trim_trailing_blank_lines},
 };
@@ -135,6 +139,69 @@ impl Herdr {
 impl Driver for Herdr {
     fn name(&self) -> &'static str {
         "herdr"
+    }
+
+    fn workspace_list(&self) -> Result<Vec<WorkspaceRecord>> {
+        let list: WorkspaceList = self.run_json(&["workspace", "list"])?;
+
+        Ok(list
+            .result
+            .workspaces
+            .into_iter()
+            .map(WorkspaceRecord::from)
+            .collect())
+    }
+
+    fn workspace_create(
+        &self,
+        label: &str,
+        cwd: &Path,
+    ) -> Result<WorkspaceRecord> {
+        let created: WorkspaceCreated =
+            self.run_json(&workspace_create_args(label, cwd))?;
+
+        Ok(WorkspaceRecord::from(created.result.workspace))
+    }
+
+    fn workspace_close(&self, id: &str) -> Result<()> {
+        self.run(&["workspace", "close", id])?;
+
+        Ok(())
+    }
+
+    fn workspace_tag(
+        &self,
+        id: &str,
+        set: &[(String, String)],
+        clear: &[String],
+    ) -> Result<BTreeMap<String, String>> {
+        self.run(&workspace_tag_args(id, set, clear))?;
+
+        let got: WorkspaceGet = self.run_json(&["workspace", "get", id])?;
+
+        Ok(got.result.workspace.tokens)
+    }
+
+    fn pane_list(&self, workspace: Option<&str>) -> Result<Vec<PaneRecord>> {
+        let panes: PaneList = self.run_json(&pane_list_args(workspace))?;
+        let panes = panes.result.panes;
+        let workspaces: WorkspaceList =
+            self.run_json(&["workspace", "list"])?;
+        let in_use: BTreeSet<&str> =
+            panes.iter().map(|p| p.workspace_id.as_str()).collect();
+        let mut tabs = HashMap::new();
+
+        for id in in_use {
+            let list: TabList = self.run_json(&tab_list_args(id))?;
+
+            tabs.extend(tab_labels(&list.result.tabs));
+        }
+
+        Ok(build_pane_records(
+            panes,
+            &workspace_labels(&workspaces.result.workspaces),
+            &tabs,
+        ))
     }
 
     fn pane_spawn(&self, request: &SpawnRequest<'_>) -> Result<Handle> {
@@ -321,6 +388,54 @@ fn agent_start_args(
     args
 }
 
+/// Arguments for `workspace create` rooted at `cwd`.
+fn workspace_create_args(label: &str, cwd: &Path) -> Vec<String> {
+    let mut args = owned(&["workspace", "create", "--label", label]);
+
+    args.extend(["--cwd".into(), cwd.to_string_lossy().into_owned()]);
+    args.push("--no-focus".into());
+
+    args
+}
+
+/// Arguments for one `workspace report-metadata` call that sets the
+/// `set` tokens and clears the `clear` tokens.
+fn workspace_tag_args(
+    id: &str,
+    set: &[(String, String)],
+    clear: &[String],
+) -> Vec<String> {
+    let mut args = owned(&["workspace", "report-metadata", id]);
+
+    args.extend(owned(&["--source", "multiplexer-driver"]));
+
+    for (key, value) in set {
+        args.extend(["--token".into(), format!("{key}={value}")]);
+    }
+
+    for key in clear {
+        args.extend(["--clear-token".into(), key.clone()]);
+    }
+
+    args
+}
+
+/// Arguments for `pane list`, limited to `workspace` when given.
+fn pane_list_args(workspace: Option<&str>) -> Vec<String> {
+    let mut args = owned(&["pane", "list"]);
+
+    if let Some(ws) = workspace {
+        args.extend(["--workspace".into(), ws.to_string()]);
+    }
+
+    args
+}
+
+/// Arguments for `tab list` of `workspace`.
+fn tab_list_args(workspace: &str) -> Vec<String> {
+    owned(&["tab", "list", "--workspace", workspace])
+}
+
 /// One pane object as Herdr prints it (only the fields we read).
 #[derive(Debug, Deserialize)]
 struct PaneJson {
@@ -357,6 +472,196 @@ struct TabCreated {
 struct TabCreatedResult {
     /// The new tab's first pane.
     root_pane: PaneJson,
+}
+
+/// `{"result":{…}}` from `pane list`.
+#[derive(Debug, Deserialize)]
+struct PaneList {
+    /// Result body.
+    result: PaneListResult,
+}
+
+/// Body of [`PaneList`].
+#[derive(Debug, Deserialize)]
+struct PaneListResult {
+    /// Every listed pane.
+    panes: Vec<PaneListItem>,
+}
+
+/// One entry of `pane list`.
+#[derive(Debug, Deserialize)]
+struct PaneListItem {
+    /// Pane ID.
+    pane_id: String,
+    /// Workspace ID.
+    workspace_id: String,
+    /// Tab ID.
+    tab_id: String,
+    /// Working directory.
+    #[serde(default)]
+    cwd: Option<String>,
+    /// Label, present only after a rename.
+    #[serde(default)]
+    label: Option<String>,
+    /// Agent kind, when Herdr recognizes one.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Agent conversation reference.
+    #[serde(default)]
+    agent_session: Option<HerdrSession>,
+    /// Agent status string.
+    #[serde(default)]
+    agent_status: String,
+}
+
+/// An agent session as Herdr prints it.
+#[derive(Debug, Deserialize)]
+struct HerdrSession {
+    /// Whether `value` is an ID or a path.
+    kind: SessionRefKind,
+    /// The ID or path.
+    value: String,
+}
+
+/// `{"result":{…}}` from `workspace list`.
+#[derive(Debug, Deserialize)]
+struct WorkspaceList {
+    /// Result body.
+    result: WorkspaceListResult,
+}
+
+/// Body of [`WorkspaceList`].
+#[derive(Debug, Deserialize)]
+struct WorkspaceListResult {
+    /// Every workspace.
+    workspaces: Vec<WorkspaceItem>,
+}
+
+/// One workspace as Herdr prints it.
+#[derive(Debug, Deserialize)]
+struct WorkspaceItem {
+    /// Workspace ID.
+    workspace_id: String,
+    /// Display label.
+    label: String,
+    /// Whether the user looks at it.
+    #[serde(default)]
+    focused: bool,
+    /// Metadata tokens; absent when empty.
+    #[serde(default)]
+    tokens: BTreeMap<String, String>,
+}
+
+impl From<WorkspaceItem> for WorkspaceRecord {
+    /// Maps `tokens` to `tags`.
+    fn from(item: WorkspaceItem) -> Self {
+        Self {
+            workspace_id: item.workspace_id,
+            label: item.label,
+            focused: item.focused,
+            tags: item.tokens,
+        }
+    }
+}
+
+/// `{"result":{"workspace":…}}` from `workspace create`.
+#[derive(Debug, Deserialize)]
+struct WorkspaceCreated {
+    /// Result body.
+    result: WorkspaceResult,
+}
+
+/// `{"result":{"workspace":…}}` from `workspace get`.
+#[derive(Debug, Deserialize)]
+struct WorkspaceGet {
+    /// Result body.
+    result: WorkspaceResult,
+}
+
+/// Body of [`WorkspaceCreated`] and [`WorkspaceGet`].
+#[derive(Debug, Deserialize)]
+struct WorkspaceResult {
+    /// The workspace.
+    workspace: WorkspaceItem,
+}
+
+/// `{"result":{…}}` from `tab list`.
+#[derive(Debug, Deserialize)]
+struct TabList {
+    /// Result body.
+    result: TabListResult,
+}
+
+/// Body of [`TabList`].
+#[derive(Debug, Deserialize)]
+struct TabListResult {
+    /// Tabs of one workspace.
+    tabs: Vec<TabItem>,
+}
+
+/// One tab as Herdr prints it.
+#[derive(Debug, Deserialize)]
+struct TabItem {
+    /// Tab ID.
+    tab_id: String,
+    /// Display label.
+    label: String,
+}
+
+/// Workspace ID to label.
+fn workspace_labels(items: &[WorkspaceItem]) -> HashMap<String, String> {
+    items
+        .iter()
+        .map(|w| (w.workspace_id.clone(), w.label.clone()))
+        .collect()
+}
+
+/// Tab ID to label.
+fn tab_labels(items: &[TabItem]) -> HashMap<String, String> {
+    items
+        .iter()
+        .map(|t| (t.tab_id.clone(), t.label.clone()))
+        .collect()
+}
+
+/// Builds pane records from `pane list` output plus workspace and tab
+/// labels (§8.1). A session means `native` session confidence; the
+/// status is always native.
+fn build_pane_records(
+    panes: Vec<PaneListItem>,
+    workspace_labels: &HashMap<String, String>,
+    tab_labels: &HashMap<String, String>,
+) -> Vec<PaneRecord> {
+    panes
+        .into_iter()
+        .map(|pane| {
+            let session_confidence = if pane.agent_session.is_some() {
+                Confidence::Native
+            } else {
+                Confidence::None
+            };
+
+            PaneRecord {
+                handle: Handle(pane.pane_id),
+                workspace_label: workspace_labels
+                    .get(&pane.workspace_id)
+                    .cloned(),
+                workspace_id: pane.workspace_id,
+                tab_label: tab_labels.get(&pane.tab_id).cloned(),
+                tab_id: pane.tab_id,
+                label: pane.label,
+                cwd: pane.cwd,
+                agent: pane.agent,
+                agent_session: pane.agent_session.map(|s| AgentSession {
+                    kind: s.kind,
+                    value: s.value,
+                }),
+                session_confidence,
+                status: map_status(&pane.agent_status),
+                status_confidence: Confidence::Native,
+            }
+        })
+        .collect()
 }
 
 /// Herdr's failure envelope on stderr.
@@ -672,6 +977,181 @@ mod tests {
             .unwrap();
 
             assert_eq!(got.result.pane.pane_id, "w1:p3");
+        }
+    }
+
+    mod list_args {
+        use super::*;
+
+        /// Owned argument strings from literals.
+        fn v(items: &[&str]) -> Vec<String> {
+            owned(items)
+        }
+
+        #[test]
+        fn should_create_workspace_without_focus() {
+            assert_eq!(
+                workspace_create_args("lbl", Path::new("/tmp")),
+                v(&[
+                    "workspace",
+                    "create",
+                    "--label",
+                    "lbl",
+                    "--cwd",
+                    "/tmp",
+                    "--no-focus"
+                ])
+            );
+        }
+
+        #[test]
+        fn should_report_one_token_flag_per_pair_when_tagging() {
+            assert_eq!(
+                workspace_tag_args(
+                    "w1",
+                    &[("a".into(), "1".into()), ("b".into(), "x=y".into())],
+                    &["c".into()]
+                ),
+                v(&[
+                    "workspace",
+                    "report-metadata",
+                    "w1",
+                    "--source",
+                    "multiplexer-driver",
+                    "--token",
+                    "a=1",
+                    "--token",
+                    "b=x=y",
+                    "--clear-token",
+                    "c"
+                ])
+            );
+        }
+
+        #[rstest]
+        #[case::all(None, &["pane", "list"])]
+        #[case::one(Some("w1"), &["pane", "list", "--workspace", "w1"])]
+        fn should_scope_pane_list_when_workspace_given(
+            #[case] workspace: Option<&str>,
+            #[case] expected: &[&str],
+        ) {
+            assert_eq!(pane_list_args(workspace), v(expected));
+        }
+
+        #[test]
+        fn should_scope_tab_list_to_workspace() {
+            assert_eq!(
+                tab_list_args("w3"),
+                v(&["tab", "list", "--workspace", "w3"])
+            );
+        }
+    }
+
+    mod build_pane_records {
+        use super::*;
+
+        /// Parses the fixtures and joins them.
+        fn records() -> Vec<PaneRecord> {
+            let panes: PaneList = serde_json::from_str(include_str!(
+                "../tests/fixtures/herdr/pane_list.json"
+            ))
+            .unwrap();
+            let workspaces: WorkspaceList = serde_json::from_str(
+                include_str!("../tests/fixtures/herdr/workspace_list.json"),
+            )
+            .unwrap();
+            let tabs: TabList = serde_json::from_str(include_str!(
+                "../tests/fixtures/herdr/tab_list.json"
+            ))
+            .unwrap();
+
+            build_pane_records(
+                panes.result.panes,
+                &workspace_labels(&workspaces.result.workspaces),
+                &tab_labels(&tabs.result.tabs),
+            )
+        }
+
+        #[test]
+        fn should_join_labels_and_session_when_agent_present() {
+            assert_eq!(
+                serde_json::to_value(&records()[0]).unwrap(),
+                serde_json::json!({
+                    "handle": "w1:p1",
+                    "workspace_id": "w1",
+                    "workspace_label": "probe",
+                    "tab_id": "w1:t1",
+                    "tab_label": "impl",
+                    "label": "impl-1",
+                    "cwd": "/home/u/proj",
+                    "agent": "claude",
+                    "agent_session": {
+                        "kind": "id",
+                        "value": "a6b4756a-1f0f-42b1-85da-9393980017be"
+                    },
+                    "session_confidence": "native",
+                    "status": "idle",
+                    "status_confidence": "native"
+                })
+            );
+        }
+
+        #[test]
+        fn should_report_path_session_when_pi() {
+            assert_eq!(
+                records()[1].agent_session.as_ref().map(|s| s.kind),
+                Some(SessionRefKind::Path)
+            );
+        }
+
+        #[test]
+        fn should_leave_agent_fields_null_when_plain_shell() {
+            let shell = &records()[2];
+
+            assert_eq!(
+                (
+                    shell.agent.as_deref(),
+                    shell.session_confidence,
+                    shell.tab_label.as_deref()
+                ),
+                (None, Confidence::None, None)
+            );
+        }
+    }
+
+    mod workspace_records {
+        use super::*;
+
+        #[test]
+        fn should_read_tokens_as_tags_when_present() {
+            let list: WorkspaceList = serde_json::from_str(include_str!(
+                "../tests/fixtures/herdr/workspace_list.json"
+            ))
+            .unwrap();
+            let records: Vec<WorkspaceRecord> = list
+                .result
+                .workspaces
+                .into_iter()
+                .map(WorkspaceRecord::from)
+                .collect();
+
+            assert_eq!(
+                (
+                    records[0].tags.get("project").map(String::as_str),
+                    records[1].tags.len()
+                ),
+                (Some("x"), 0)
+            );
+        }
+
+        #[test]
+        fn should_read_workspace_when_created() {
+            let created: WorkspaceCreated = serde_json::from_str(
+                include_str!("../tests/fixtures/herdr/workspace_create.json"),
+            )
+            .unwrap();
+
+            assert_eq!(created.result.workspace.workspace_id, "w1");
         }
     }
 }

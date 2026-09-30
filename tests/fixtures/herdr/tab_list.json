@@ -1,0 +1,1 @@
+{"id":"cli:tab:list","result":{"tabs":[{"agent_status":"done","focused":true,"label":"impl","number":1,"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},{"agent_status":"working","focused":false,"label":"review","number":2,"pane_count":1,"tab_id":"w1:t2","workspace_id":"w1"}],"type":"tab_list"}}

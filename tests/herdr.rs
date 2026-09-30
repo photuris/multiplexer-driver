@@ -527,6 +527,74 @@ fn should_exit_4_when_cli_reads_missing_pane(server: &Server) {
     assert_eq!(last_error_type(&output), "not_found");
 }
 
+/// A workspace created through the driver is listed with its tag.
+fn should_list_created_workspace_with_tags(server: &Server) -> String {
+    let driver = server.driver();
+    let created = driver
+        .workspace_create("md-ws2", Path::new("/tmp"))
+        .expect("workspace create");
+    let tags = driver
+        .workspace_tag(
+            &created.workspace_id,
+            &[("project".into(), "x".into())],
+            &[],
+        )
+        .expect("workspace tag");
+
+    assert_eq!(tags.get("project").map(String::as_str), Some("x"));
+    assert_eq!(tags.len(), 1, "got {tags:?}");
+
+    let listed = driver.workspace_list().expect("workspace list");
+    let found = listed
+        .iter()
+        .find(|w| w.workspace_id == created.workspace_id)
+        .expect("created workspace is listed");
+
+    assert_eq!(found.label, "md-ws2");
+    assert_eq!(found.tags.get("project").map(String::as_str), Some("x"));
+
+    created.workspace_id
+}
+
+/// Clearing the only tag leaves an empty map.
+fn should_clear_tag(server: &Server, workspace: &str) {
+    let tags = server
+        .driver()
+        .workspace_tag(workspace, &[], &["project".into()])
+        .expect("workspace tag");
+
+    assert!(tags.is_empty(), "got {tags:?}");
+}
+
+/// The listing carries the renamed pane and the workspace label.
+fn should_list_every_pane_with_labels(server: &Server) {
+    let panes = server
+        .driver()
+        .pane_list(Some(&server.workspace))
+        .expect("pane list");
+    let root = panes
+        .iter()
+        .find(|p| p.handle == server.root)
+        .expect("root pane is listed");
+
+    assert_eq!(root.label.as_deref(), Some("renamed"));
+    assert_eq!(root.workspace_label.as_deref(), Some("md-test"));
+}
+
+/// A closed workspace is gone from the listing.
+fn should_close_workspace(server: &Server, workspace: &str) {
+    let driver = server.driver();
+
+    driver.workspace_close(workspace).expect("workspace close");
+
+    let listed = driver.workspace_list().expect("workspace list");
+
+    assert!(
+        listed.iter().all(|w| w.workspace_id != workspace),
+        "still listed: {listed:?}"
+    );
+}
+
 /// Runs every scenario, in order, against one throwaway server.
 #[test]
 fn herdr_driver_scenarios() {
@@ -562,4 +630,12 @@ fn herdr_driver_scenarios() {
     ok("should_exit_3_when_cli_session_missing");
     should_exit_4_when_cli_reads_missing_pane(&server);
     ok("should_exit_4_when_cli_reads_missing_pane");
+    let second = should_list_created_workspace_with_tags(&server);
+    ok("should_list_created_workspace_with_tags");
+    should_clear_tag(&server, &second);
+    ok("should_clear_tag");
+    should_list_every_pane_with_labels(&server);
+    ok("should_list_every_pane_with_labels");
+    should_close_workspace(&server, &second);
+    ok("should_close_workspace");
 }
