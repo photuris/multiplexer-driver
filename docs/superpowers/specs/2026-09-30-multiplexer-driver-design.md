@@ -104,6 +104,11 @@ call within `rust-style`):
 
 `notify` and `agent resume-args` do not go through the trait.
 
+`pane_wait` is one shared function in `driver.rs`, not a per-driver
+method: it calls `pane_status` every 500 ms until the status is in the
+`--until` set, and fails with `timeout` past the deadline. It works for
+every harness that implements `pane_status`.
+
 Each driver keeps its subprocess call in one private helper (run, and
 run-and-parse-JSON). Argv construction and output parsing live in pure
 functions so unit tests cover them without a harness.
@@ -230,7 +235,9 @@ with `null`, never omitted, so `jq` paths are stable.
  "tags":{"project":"x"}}
 ```
 
-`tags` is `null` when the harness cannot read tags back (Herdr).
+`tags` is always an object (empty when there are none). On Herdr it
+holds every metadata token on the workspace, including tokens other
+tools reported.
 
 **PaneRecord** (gap 2)
 
@@ -418,9 +425,8 @@ Every call is `tmux [-L <session>] <subcommand> …`.
   patterns first, then `idle`. A match gives that status with
   `heuristic`. No match gives `working` with `heuristic`. Always
   include `tail`.
-- **pane wait:** requires `--patterns` (usage error otherwise). Poll
-  `pane status` every 500 ms until the status is in `--until`, then
-  return that result. Past the timeout, fail with `timeout` (exit 7).
+- **pane wait:** requires `--patterns` (usage error otherwise), then
+  the shared poll loop (4.2).
 
 ### 7.3 Patterns file
 
@@ -447,7 +453,7 @@ command prints JSON. Success output is `{"id":…,"result":{…}}`. A
 failure writes `{"error":{"code":…,"message":…}}` to stderr and exits
 non-zero. The run helper parses that envelope into
 `"<code>: <message>"`, falls back to raw stderr text, and classifies
-by `code` (see 5.5).
+by `code` (see 5.5 and 12).
 
 Handles are pane IDs (`w1:p2`). They are Herdr's stable public
 address, valid for pane and agent commands, and they survive renames.
@@ -456,24 +462,26 @@ Workspace IDs look like `w1`, tab IDs like `w1:t2`.
 ### 8.1 Commands
 
 - **workspace list:** `workspace list` →
-  `result.workspaces[]` with `workspace_id`, `label`, `focused`.
-  `tags` is `null`.
+  `result.workspaces[]` with `workspace_id`, `label`, `focused`, and
+  `tokens` (an object, absent when empty). `tags` is `tokens` or `{}`.
 - **workspace create:** `workspace create --label <L> --cwd <D>
-  --no-focus`. The result shape is not yet captured: capture it live,
-  save it as a fixture, and parse the workspace ID from it.
+  --no-focus` → `result.workspace` (same shape as a `workspace list`
+  entry). It also returns `result.root_pane` and `result.tab`, unused.
 - **workspace close:** `workspace close <id>`.
 - **workspace tag:** `workspace report-metadata <id> --source
   multiplexer-driver --token k=v…` and `--clear-token k` per clear.
-  Herdr does not return metadata in `workspace get` or `list`, so the
-  output `tags` is `null`. Open item: check live whether metadata
-  expires without `--ttl-ms`, and record the answer in AGENTS.md.
+  Then return the workspace's `tokens` from `workspace get <id>`
+  (`result.workspace.tokens`). Verified live: tokens appear in `get`
+  and `list`, `--clear-token` removes one, tokens from other sources
+  are merged in, and tokens without `--ttl-ms` were still present after
+  20 s. Whether they survive a server restart is unverified.
 - **pane list:** `pane list [--workspace <ws>]` → `result.panes[]`
   with `pane_id`, `workspace_id`, `tab_id`, `cwd`, `agent`,
   `agent_session{kind,value}`, `agent_status`. Add labels by joining
   `workspace list` (workspace label) and `tab list --workspace <ws>`
-  (tab `label`) for each workspace present. Pane `label`: use a
-  `label` field on the pane object if present, else `null`. Open item:
-  rename a test pane and capture `pane list` to confirm the field name.
+  (tab `label`) for each workspace present. Pane `label` is the pane
+  object's `label` field, present only after `pane rename` (verified),
+  else `null`.
   When `agent_session` is present, `session_confidence` is `native`,
   else `none`. `status_confidence` is always `native`.
 - **pane spawn:** `tab create --workspace <ws> --cwd <D> --label <N>
@@ -502,10 +510,9 @@ Workspace IDs look like `w1`, tab IDs like `w1:t2`.
   `blocked`, anything else → `unknown`. Confidence is `native`, `tail`
   is `null`. `done` only means "the user has not looked yet" in
   Herdr's UI. It has no meaning for an automated caller.
-- **pane wait:** `agent wait <h> --until <s>… --timeout <ms>`. When
-  `--until` includes `idle`, also pass `--until done`. On success,
-  return a fresh `pane status`. Open item: capture how Herdr reports a
-  timeout and map it to `timeout` (exit 7).
+- **pane wait:** the shared poll loop (4.2). Herdr's own `agent
+  wait` is not used: its timeout report could not be observed without
+  a real agent, and one loop for every harness is less code.
 
 ### 8.2 Starting a command in a pane
 
@@ -555,11 +562,16 @@ Reaches the user, not an agent. It does not use `--harness`.
   server with `-L md-test-<pid>-<n>` and kills it at the end. Tests
   never touch the user's default tmux server. They run on every
   `cargo test` when `tmux` is on PATH, and skip otherwise.
-- **Herdr integration (`tests/herdr.rs`):** run only when
-  `MULTIPLEXER_DRIVER_TEST_HERDR_SESSION` names a session. The tests
-  refuse the names `personal`, `work`, and `default`. They create
-  and clean up their own workspace. They start only `bash`, never a
-  paid agent CLI. Skip otherwise.
+- **Herdr integration (`tests/herdr.rs`):** each test binary starts
+  its own headless server, `herdr --session md-test-<pid> server`, in
+  the background, with every `HERDR_*` variable removed from its
+  environment. It waits for
+  `$XDG_CONFIG_HOME/herdr/sessions/md-test-<pid>/herdr.sock` to appear
+  (up to 5 s), runs the tests with `--session md-test-<pid>`, then runs
+  `herdr server stop` against that socket and `herdr session delete
+  md-test-<pid>`. Verified live on 2026-09-30. Tests never touch any
+  other session and start only shells, never a paid agent CLI. Skip
+  when `herdr` is not on PATH.
 - **Checks before every commit:** `cargo fmt --check`, `cargo clippy
   --all-targets --all-features --locked -- -D warnings`, `cargo test
   --locked`.
@@ -592,7 +604,7 @@ Each phase ends with its tests green.
   it can choose the ID up front (`claude --session-id <uuid>`, `pi
   --session-id <id>`), and store it in a pane option
   (`@md-agent-session`). Codex has no such flag as of 2026-09-30.
-- **Herdr live checks during implementation:** the `workspace
-  create` result shape, the pane label field after `pane rename`,
-  the `agent wait` timeout report, error `code` values for a missing
-  pane or workspace, and metadata expiry.
+- **Herdr error codes** seen live (all on stderr, exit 1):
+  `pane_not_found`, `workspace_not_found`, `agent_not_found` (also
+  returned by `agent prompt` on a pane with no recognized agent). All
+  three map to `not_found`. Other codes are `unexpected` until seen.
