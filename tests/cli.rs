@@ -292,3 +292,50 @@ fn should_exit_quietly_when_stdout_closes() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// Every awkward argument must reach the binary unchanged after a real
+/// PowerShell has parsed the line `powershell_join` built. Both Windows
+/// PowerShell 5.1 and PowerShell 7 are checked; `pwsh` is skipped when
+/// it is not installed.
+#[cfg(windows)]
+#[rstest]
+#[case::powershell("powershell")]
+#[case::pwsh("pwsh")]
+fn should_round_trip_argv_when_run_through_powershell(#[case] shell: &str) {
+    let binary = env!("CARGO_BIN_EXE_multiplexer-driver");
+
+    for arg in ["a b", "$HOME", "it's", "\u{2018}x\u{2019}", "x&y"] {
+        let line = multiplexer_driver::text::powershell_join(&[
+            binary.to_string(),
+            "agent".to_string(),
+            "resume-args".to_string(),
+            "--kind".to_string(),
+            "claude".to_string(),
+            "--session-ref".to_string(),
+            arg.to_string(),
+        ])
+        .unwrap_or_else(|e| panic!("joining {arg:?}: {e}"));
+        let output = match Command::new(shell)
+            .args(["-NoProfile", "-Command", &line])
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipping: {shell} is not installed");
+
+                return;
+            }
+            Err(e) => panic!("running {shell}: {e}"),
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value: serde_json::Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{shell} {arg:?}: stdout {stdout:?}, stderr {:?}: {e}",
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            });
+
+        assert_eq!(value["argv"][2].as_str(), Some(arg), "{shell} {line}");
+    }
+}

@@ -2,6 +2,8 @@
 //! (`-L md-test-<pid>-<n>`) and kills it on drop, so the user's own
 //! server is never touched.
 
+#![cfg(unix)]
+
 use std::{
     fs, io,
     path::Path,

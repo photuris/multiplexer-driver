@@ -4,6 +4,7 @@
 //! and deletes the session. No other session is touched. Only shells run
 //! in panes, never a paid agent.
 
+#![cfg(unix)]
 // Helpers outside `#[test]` fns are not covered by clippy.toml's
 // allow-expect-in-tests; a failed setup step must panic with a message.
 #![expect(clippy::expect_used, reason = "test helpers panic on failure")]
@@ -32,8 +33,6 @@ struct Server {
     program: String,
     /// Session name, always `md-test-…`.
     name: String,
-    /// Socket file of the session.
-    socket: PathBuf,
     /// Server process.
     child: Child,
     /// Whether this test created the session. Only an owned session is
@@ -130,25 +129,27 @@ impl Server {
         let mut server = Self {
             program: program.to_string(),
             name: name.to_string(),
-            socket: session_dir.join("herdr.sock"),
             child,
             owned: true,
             workspace: String::new(),
             root: Handle(String::new()),
         };
 
-        server.wait_for_socket()?;
+        server.wait_until_ready()?;
         server.create_workspace();
 
         Ok(server)
     }
 
-    /// Waits up to 5 s for the socket, failing at once if the child
-    /// has exited (and then disowning the session).
-    fn wait_for_socket(&mut self) -> Result<(), StartError> {
+    /// Polls `workspace list` every 100 ms for up to 5 s until the
+    /// server answers, failing at once if the child has exited (and
+    /// then disowning the session).
+    fn wait_until_ready(&mut self) -> Result<(), StartError> {
         let deadline = Instant::now() + Duration::from_secs(5);
 
-        while !self.socket.exists() {
+        loop {
+            thread::sleep(Duration::from_millis(100));
+
             if let Ok(Some(status)) = self.child.try_wait() {
                 self.owned = false;
 
@@ -157,14 +158,16 @@ impl Server {
                 )));
             }
 
-            if Instant::now() >= deadline {
-                return Err(StartError::Failed("no socket after 5 s".into()));
+            if self.herdr_output(&["workspace", "list"]).status.success() {
+                return Ok(());
             }
 
-            thread::sleep(Duration::from_millis(50));
+            if Instant::now() >= deadline {
+                return Err(StartError::Failed(
+                    "server not ready after 5 s".into(),
+                ));
+            }
         }
-
-        Ok(())
     }
 
     /// Creates the workspace the scenarios run in.
@@ -216,7 +219,7 @@ impl Server {
         assert!(self.owned, "refusing to command a session we do not own");
 
         clean_herdr(&self.program)
-            .env("HERDR_SOCKET_PATH", &self.socket)
+            .args(["--session", &self.name])
             .args(args)
             .output()
             .expect("running herdr")
@@ -261,7 +264,6 @@ fn startup_never_touches_foreign_session() {
     let fake = dir.join("fake-herdr");
 
     fs::create_dir_all(&session).expect("create fake config");
-    fs::write(session.join("herdr.sock"), "").expect("fake socket");
     // POSIX-quoted, so a TMPDIR with spaces or quotes stays one word.
     let quoted_log = shell_join(&[log.to_string_lossy().into_owned()]);
 

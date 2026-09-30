@@ -112,6 +112,7 @@ mod tests {
     mod output_within {
         use super::*;
 
+        #[cfg(unix)]
         #[test]
         fn should_capture_stdout_when_child_exits() {
             let mut command = Command::new("sh");
@@ -123,6 +124,19 @@ mod tests {
             assert_eq!(output.stdout, b"hi\n");
         }
 
+        #[cfg(windows)]
+        #[test]
+        fn should_capture_stdout_when_child_exits() {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "echo hi"]);
+
+            let output = output_within(&mut command, CEILING).unwrap();
+
+            assert!(output.status.success());
+            assert_eq!(output.stdout, b"hi\r\n");
+        }
+
+        #[cfg(unix)]
         #[test]
         fn should_kill_when_child_outlives_limit() {
             let mut command = Command::new("sleep");
@@ -140,6 +154,25 @@ mod tests {
             );
         }
 
+        #[cfg(windows)]
+        #[test]
+        fn should_kill_when_child_outlives_limit() {
+            let mut command = Command::new("powershell");
+            command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 5"]);
+            let started = Instant::now();
+
+            let err = output_within(&mut command, Duration::from_millis(500))
+                .unwrap_err();
+
+            assert!(
+                err.kind() == io::ErrorKind::TimedOut
+                    && started.elapsed() < Duration::from_secs(3),
+                "got {err:?} after {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[cfg(unix)]
         #[rstest::rstest]
         #[case::stdout("sleep 2 & exit 0")]
         #[case::stderr("sleep 2 >/dev/null & exit 0")]
