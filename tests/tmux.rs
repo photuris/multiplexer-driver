@@ -402,7 +402,8 @@ fn should_exit_3_when_cli_raw_server_gone() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     let last = stderr.lines().last().unwrap_or_default();
-    let record: serde_json::Value = serde_json::from_str(last).unwrap();
+    let record: serde_json::Value = serde_json::from_str(last)
+        .unwrap_or_else(|e| panic!("stderr line {last:?}: {e}"));
 
     assert_eq!(output.status.code(), Some(3));
     assert_eq!(record["error"]["type"], "harness_unavailable");
@@ -501,4 +502,228 @@ fn should_start_in_cwd_when_split_path_ends_with_semicolon(
         .unwrap();
 
     assert_eq!(pane_path(&server, &pane), dir.0.to_string_lossy());
+}
+
+#[test]
+fn should_round_trip_tags_when_set_and_cleared() {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let set = [
+        ("project".to_string(), "x".to_string()),
+        ("tmp".to_string(), "y".to_string()),
+    ];
+
+    driver.workspace_tag(&ws, &set, &[]).unwrap();
+    let tags = driver.workspace_tag(&ws, &[], &["tmp".into()]).unwrap();
+
+    assert_eq!(
+        tags.into_iter().collect::<Vec<_>>(),
+        vec![("project".to_string(), "x".to_string())]
+    );
+}
+
+#[test]
+fn should_round_trip_tag_values_when_escaped() {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let values = ["a\"b\\c d", "it's", ""];
+    let set: Vec<(String, String)> = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (format!("k{i}"), (*v).to_string()))
+        .collect();
+
+    let tags = driver.workspace_tag(&ws, &set, &[]).unwrap();
+
+    let read: Vec<&str> = tags.values().map(String::as_str).collect();
+    assert_eq!(read, values);
+}
+
+#[test]
+fn should_list_every_pane_with_labels_when_listing() {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let command = cmd(&["sleep", "30"]);
+    driver
+        .pane_spawn(&SpawnRequest {
+            name: "lbl",
+            workspace: Some(&ws),
+            cwd: Path::new("/tmp"),
+            command: &command,
+        })
+        .unwrap();
+
+    let labels: Vec<Option<String>> = driver
+        .pane_list(None)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.label)
+        .collect();
+
+    assert_eq!(labels, vec![None, Some("lbl".into())]);
+}
+
+#[test]
+fn should_create_list_and_close_workspace() {
+    let server = server!();
+    let driver = server.driver();
+
+    let created = driver
+        .workspace_create("second", Path::new("/tmp"))
+        .unwrap();
+    let mut during: Vec<String> = driver
+        .workspace_list()
+        .unwrap()
+        .into_iter()
+        .map(|w| w.label)
+        .collect();
+    during.sort(); // tmux orders sessions by name
+    driver.workspace_close(&created.workspace_id).unwrap();
+    let after: Vec<String> = driver
+        .workspace_list()
+        .unwrap()
+        .into_iter()
+        .map(|w| w.label)
+        .collect();
+
+    assert_eq!(
+        (during, after),
+        (
+            vec!["second".to_string(), "ws".to_string()],
+            vec!["ws".to_string()]
+        )
+    );
+}
+
+#[test]
+fn should_list_nothing_when_server_absent() {
+    let driver = Tmux::new(
+        Some(format!("md-test-absent-{}", std::process::id())),
+        None,
+    );
+    let installed = !matches!(
+        driver.raw(&["-V".to_string()]),
+        Err(multiplexer_driver::driver::Error::HarnessUnavailable(m))
+            if m.contains("not installed")
+    );
+
+    if !installed {
+        eprintln!("tmux not available; skipping");
+        return;
+    }
+
+    assert!(
+        driver.pane_list(None).unwrap().is_empty()
+            && driver.workspace_list().unwrap().is_empty()
+    );
+}
+
+#[test]
+fn should_return_idle_when_waited_pattern_appears() {
+    let server = server!();
+    let pane = first_pane(&server);
+    let patterns = Patterns::from_json(r#"{"idle":["md-2-waited"]}"#).unwrap();
+    let driver = Tmux::new(Some(server.name.clone()), Some(patterns));
+    // The pattern matches only the output, not the typed command line.
+    driver
+        .pane_prompt(&pane, "sleep 1; echo md-$((1+1))-waited")
+        .unwrap();
+
+    let result = multiplexer_driver::driver::wait_for(
+        &driver,
+        &pane,
+        &[Status::Idle],
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    )
+    .unwrap();
+
+    assert_eq!(result.status, Status::Idle);
+}
+
+/// Runs the built CLI against the server; returns exit code, stdout,
+/// and stderr.
+fn cli(server: &Server, args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_multiplexer-driver"))
+        .args(["--harness", "tmux", "--session", &server.name])
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("running the CLI: {e}"));
+
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The `error.type` of the last stderr line.
+fn error_type(stderr: &str) -> String {
+    let last = stderr.lines().last().unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(last)
+        .unwrap_or_else(|e| panic!("stderr line {last:?}: {e}"));
+
+    value["error"]["type"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn should_exit_4_when_cli_reads_missing_pane() {
+    let server = server!();
+
+    let (code, _, stderr) = cli(&server, &["pane", "read", "%999"]);
+
+    assert_eq!((code, error_type(&stderr).as_str()), (4, "not_found"));
+}
+
+#[test]
+fn should_exit_7_when_cli_wait_times_out() {
+    let server = server!();
+    let file = std::env::temp_dir().join(format!(
+        "md-test-patterns-{}-{}.json",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::write(&file, r#"{"idle":["^never-matches$"]}"#).unwrap();
+    let pane = first_pane(&server);
+
+    let (code, _, stderr) = cli(
+        &server,
+        &[
+            "pane",
+            "wait",
+            &pane.0,
+            "--timeout",
+            "300ms",
+            "--patterns",
+            &file.to_string_lossy(),
+        ],
+    );
+    let _ = fs::remove_file(&file); // best effort
+
+    assert_eq!((code, error_type(&stderr).as_str()), (7, "timeout"));
+}
+
+#[test]
+fn should_print_jsonl_when_cli_lists_panes() {
+    let server = server!();
+    server.tmux(&["split-window", "-d", "-t", "ws"]);
+
+    let (code, stdout, _) = cli(&server, &["--pretty", "pane", "list"]);
+    let lines: Vec<&str> = stdout.lines().collect();
+    let all_objects = lines.iter().all(|l| {
+        !l.starts_with('[')
+            && serde_json::from_str::<serde_json::Value>(l)
+                .is_ok_and(|v| v.is_object())
+    });
+
+    assert_eq!((code, lines.len(), all_objects), (0, 2, true));
 }

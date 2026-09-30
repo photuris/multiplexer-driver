@@ -2,7 +2,9 @@
 //! handles are tmux pane IDs (`%12`).
 
 use std::{
+    collections::BTreeMap,
     env, io,
+    path::Path,
     process::{Command, Output},
     thread,
     time::Duration,
@@ -11,7 +13,10 @@ use std::{
 use crate::{
     agents::is_known_kind,
     driver::{Driver, Error, Result, SpawnRequest, SplitRequest},
-    model::{Confidence, Direction, Handle, Status, StatusResult},
+    model::{
+        Confidence, Direction, Handle, PaneRecord, Status, StatusResult,
+        WorkspaceRecord,
+    },
     patterns::Patterns,
     process,
     text::{shell_join, trim_trailing_blank_lines},
@@ -19,6 +24,18 @@ use crate::{
 
 /// The pane format every pane-creating command prints.
 const PANE_ID: &str = "#{pane_id}";
+
+/// `list-panes` format: one tab-separated line per pane.
+const PANE_FORMAT: &str = "#{pane_id}\t#{session_id}\t#{session_name}\t\
+#{window_id}\t#{window_name}\t#{@md-label}\t#{pane_current_path}\t\
+#{@md-agent}\t#{pane_current_command}";
+
+/// `list-sessions` format: ID, name, attached-client count.
+const SESSION_FORMAT: &str =
+    "#{session_id}\t#{session_name}\t#{session_attached}";
+
+/// Session option prefix for workspace tags.
+const TAG_PREFIX: &str = "@md-tag-";
 
 /// Lines of output `pane status` classifies.
 const STATUS_LINES: u32 = 15;
@@ -137,6 +154,28 @@ impl Tmux {
         Ok(())
     }
 
+    /// Reads the tags of session `id`: key names from `show-options`,
+    /// each value from `show-options -v`, because the plain listing
+    /// quotes and escapes values.
+    fn read_tags(&self, id: &str) -> Result<BTreeMap<String, String>> {
+        let listing = self.run(&["show-options", "-t", id])?;
+        let mut tags = BTreeMap::new();
+
+        for key in parse_tag_keys(&listing) {
+            let option = format!("{TAG_PREFIX}{key}");
+            let mut value =
+                self.run(&["show-options", "-v", "-t", id, &option])?;
+
+            if value.ends_with('\n') {
+                value.pop();
+            }
+
+            tags.insert(key, value);
+        }
+
+        Ok(tags)
+    }
+
     /// Sets a pane-scoped user option.
     fn set_pane_option(
         &self,
@@ -154,6 +193,106 @@ impl Tmux {
 impl Driver for Tmux {
     fn name(&self) -> &'static str {
         "tmux"
+    }
+
+    fn workspace_list(&self) -> Result<Vec<WorkspaceRecord>> {
+        let listing = match self.run(&["list-sessions", "-F", SESSION_FORMAT])
+        {
+            Err(Error::HarnessUnavailable(msg)) if is_no_server(&msg) => {
+                return Ok(Vec::new());
+            }
+            other => other?,
+        };
+        let mut records = Vec::new();
+
+        for line in listing.lines().filter(|l| !l.is_empty()) {
+            let fields: Vec<&str> = line.split('\t').collect();
+
+            let [id, label, attached] = fields[..] else {
+                tracing::warn!("skipping malformed session line: {line:?}");
+                continue;
+            };
+
+            records.push(WorkspaceRecord {
+                workspace_id: id.to_string(),
+                label: label.to_string(),
+                focused: attached.parse::<u32>().is_ok_and(|n| n > 0),
+                tags: self.read_tags(id)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    fn workspace_create(
+        &self,
+        label: &str,
+        cwd: &Path,
+    ) -> Result<WorkspaceRecord> {
+        let name = escape_semicolon(label);
+        let cwd = escape_semicolon(&cwd.to_string_lossy());
+        let id = self.run(&[
+            "new-session",
+            "-d",
+            "-s",
+            &name,
+            "-c",
+            &cwd,
+            "-P",
+            "-F",
+            "#{session_id}",
+        ])?;
+
+        Ok(WorkspaceRecord {
+            workspace_id: id.trim().to_string(),
+            label: label.to_string(),
+            focused: false,
+            tags: BTreeMap::new(),
+        })
+    }
+
+    fn workspace_close(&self, id: &str) -> Result<()> {
+        self.run(&["kill-session", "-t", id])?;
+
+        Ok(())
+    }
+
+    fn workspace_tag(
+        &self,
+        id: &str,
+        set: &[(String, String)],
+        clear: &[String],
+    ) -> Result<BTreeMap<String, String>> {
+        for (key, value) in set {
+            let option = format!("{TAG_PREFIX}{key}");
+            let value = escape_semicolon(value);
+
+            self.run(&["set-option", "-t", id, &option, &value])?;
+        }
+
+        for key in clear {
+            let option = format!("{TAG_PREFIX}{key}");
+
+            self.run(&["set-option", "-u", "-t", id, &option])?;
+        }
+
+        self.read_tags(id)
+    }
+
+    fn pane_list(&self, workspace: Option<&str>) -> Result<Vec<PaneRecord>> {
+        let mut args = vec!["list-panes", "-F", PANE_FORMAT];
+
+        match workspace {
+            Some(ws) => args.extend(["-s", "-t", ws]),
+            None => args.push("-a"),
+        }
+
+        match self.run(&args) {
+            Err(Error::HarnessUnavailable(msg)) if is_no_server(&msg) => {
+                Ok(Vec::new())
+            }
+            other => Ok(parse_panes(&other?)),
+        }
     }
 
     fn pane_spawn(&self, request: &SpawnRequest<'_>) -> Result<Handle> {
@@ -328,6 +467,78 @@ fn escape_semicolon(text: &str) -> String {
     }
 }
 
+/// True when tmux stderr means no server is running (§7.4): the
+/// `no server running` text, or a connect failure caused by a missing
+/// or refusing socket. Other connect failures (permission denied) are
+/// real errors.
+fn is_no_server(stderr: &str) -> bool {
+    stderr.starts_with("no server running")
+        || (stderr.starts_with("error connecting to")
+            && (stderr.contains("No such file or directory")
+                || stderr.contains("Connection refused")))
+}
+
+/// Turns an empty field into `None`.
+fn non_empty(field: &str) -> Option<String> {
+    (!field.is_empty()).then(|| field.to_string())
+}
+
+/// Parses `list-panes` output in [`PANE_FORMAT`]. Status and session
+/// are never known from listing alone (§7.2).
+fn parse_panes(output: &str) -> Vec<PaneRecord> {
+    let mut records = Vec::new();
+
+    for line in output.lines().filter(|l| !l.is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+
+        let [
+            pane,
+            ws_id,
+            ws_label,
+            tab_id,
+            tab_label,
+            label,
+            cwd,
+            agent,
+            command,
+        ] = fields[..]
+        else {
+            tracing::warn!("skipping malformed pane line: {line:?}");
+            continue;
+        };
+        let agent = non_empty(agent)
+            .or_else(|| is_known_kind(command).then(|| command.to_string()));
+
+        records.push(PaneRecord {
+            handle: Handle(pane.to_string()),
+            workspace_id: ws_id.to_string(),
+            workspace_label: non_empty(ws_label),
+            tab_id: tab_id.to_string(),
+            tab_label: non_empty(tab_label),
+            label: non_empty(label),
+            cwd: non_empty(cwd),
+            agent,
+            agent_session: None,
+            session_confidence: Confidence::None,
+            status: Status::Unknown,
+            status_confidence: Confidence::None,
+        });
+    }
+
+    records
+}
+
+/// Extracts tag keys from `show-options` output: the first word of
+/// each `@md-tag-<key>` line, prefix removed.
+fn parse_tag_keys(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter_map(|name| name.strip_prefix(TAG_PREFIX))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Maps tmux stderr text to an [`Error`] (§7.4).
 fn classify_error(stderr: &str) -> Error {
     let message = stderr.to_string();
@@ -399,6 +610,83 @@ mod tests {
             #[case] escaped: &str,
         ) {
             assert_eq!(escape_semicolon(text), escaped);
+        }
+    }
+
+    mod is_no_server {
+        use super::*;
+
+        #[rstest]
+        #[case::running("no server running on /tmp/tmux-1000/x", true)]
+        #[case::missing(
+            "error connecting to /x (No such file or directory)",
+            true
+        )]
+        #[case::refused("error connecting to /x (Connection refused)", true)]
+        #[case::permission(
+            "error connecting to /x (Permission denied)",
+            false
+        )]
+        #[case::other("can't find pane: %1", false)]
+        fn should_recognise_only_real_no_server_errors(
+            #[case] stderr: &str,
+            #[case] expected: bool,
+        ) {
+            assert_eq!(is_no_server(stderr), expected);
+        }
+    }
+
+    mod parse_panes {
+        use super::*;
+
+        #[test]
+        fn should_fill_record_when_line_complete() {
+            let line = "%1\t$0\tws\t@1\ttabby\timpl-1\t/tmp\tclaude\tnode";
+
+            let records = parse_panes(line);
+
+            assert_eq!(
+                serde_json::to_value(&records[0]).unwrap(),
+                serde_json::json!({
+                    "handle":"%1","workspace_id":"$0","workspace_label":"ws",
+                    "tab_id":"@1","tab_label":"tabby","label":"impl-1",
+                    "cwd":"/tmp","agent":"claude","agent_session":null,
+                    "session_confidence":"none","status":"unknown",
+                    "status_confidence":"none"
+                })
+            );
+        }
+
+        #[test]
+        fn should_detect_agent_from_command_when_option_empty() {
+            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t/tmp\t\tcodex");
+
+            assert_eq!(records[0].agent.as_deref(), Some("codex"));
+        }
+
+        #[test]
+        fn should_leave_agent_null_when_command_unknown() {
+            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t/tmp\t\tbash");
+
+            assert_eq!(records[0].agent, None);
+        }
+
+        #[test]
+        fn should_skip_line_when_fields_missing() {
+            assert!(parse_panes("%0\t$0\tws\n").is_empty());
+        }
+    }
+
+    mod parse_tag_keys {
+        use super::*;
+
+        #[test]
+        fn should_keep_only_md_tag_options() {
+            let keys = parse_tag_keys(
+                "@md-tag-project x\n@other y\nstatus on\n@md-tag-k \"a b\"\n",
+            );
+
+            assert_eq!(keys, vec!["project".to_string(), "k".to_string()]);
         }
     }
 
