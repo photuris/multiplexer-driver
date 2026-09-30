@@ -137,7 +137,8 @@ The global `--session <name>` flag selects which harness server to
 use. Without it, the ambient server is used, as the environment
 already selects it.
 
-- **Herdr:** set `HERDR_SOCKET_PATH` on every `herdr` child process.
+- **Herdr:** superseded by section 13.1 (name-based routing). Former rule:
+  set `HERDR_SOCKET_PATH` on every `herdr` child process.
   Before that, remove every `HERDR_*` variable from the child
   environment, so the caller's own session, workspace, and pane
   variables never leak into a call aimed at another session.
@@ -652,3 +653,72 @@ Each phase ends with its tests green.
   `pane_not_found`, `workspace_not_found`, `agent_not_found` (also
   returned by `agent prompt` on a pane with no recognized agent). All
   three map to `not_found`. Other codes are `unexpected` until seen.
+
+## 13. Windows support (Herdr only), added 2026-09-30
+
+Approved by the user on 2026-09-30. Herdr documents native Windows
+support as generally available (docs for 0.9.3). tmux does not run
+natively on Windows. On Windows the tmux driver still compiles and
+reports `harness_unavailable` because the binary is missing. Local
+verification stays on Herdr 0.8.2 (user decision).
+
+### 13.1 Session routing (all platforms, replaces the socket path in 4.4)
+
+With `--session <name>`, the Herdr driver runs `herdr --session <name>
+<subcommand> …` and still removes every `HERDR_*` variable from the
+child environment. It no longer computes a socket path or checks for a
+socket file. Verified on Linux (Herdr 0.8.2): both `herdr --session
+<name> <subcommand>` and `HERDR_SESSION=<name>` route to that session.
+A session with no running server fails with error code
+`server_not_running`, which maps to `harness_unavailable` (exit 3). It
+does not create a session. Without `--session`, the ambient environment
+selects the server, as before.
+
+### 13.2 Command quoting for `pane run`
+
+`herdr pane run` takes one command string, which the pane's shell
+parses. On Unix the driver keeps `shell_join` (POSIX, section 6). On
+Windows it uses `powershell_join` and assumes PowerShell panes (user
+decision; a pane running `cmd.exe` will not parse it):
+
+- An argument that is non-empty and matches `^[A-Za-z0-9_./=-]+$`
+  stays as is. Every other argument is wrapped in single quotes, with
+  each embedded single-quote character doubled. PowerShell also treats
+  U+2018, U+2019, U+201A, and U+201B as single quotes, so each of those
+  is doubled as well. The empty string becomes `''`.
+- If the first argument (the command name) was quoted, the line starts
+  with the call operator and a space: `& 'my tool' arg`. A quoted first
+  token is a string expression in PowerShell, not a command.
+
+Both functions are `pub` in `text.rs` and are unit-tested on every
+platform. `#[cfg(windows)]` selects which one `pane run` uses. Known
+agent kinds go through `agent start … -- <args>`, which is argv, and are
+unaffected by quoting.
+
+### 13.3 Tests and CI
+
+- Unix-only test code is gated with `#[cfg(unix)]`: `tests/tmux.rs` as a
+  whole, fake-script fixtures that use `sh` or file permissions, and the
+  `process.rs` tests that use `sh`. `process.rs` gains Windows
+  equivalents of its two basic tests under `#[cfg(windows)]`.
+- The Herdr integration test (`tests/herdr.rs`) runs on Unix only for
+  now: its scenarios use POSIX shell commands in panes. Its harness
+  waits for server readiness by polling `herdr --session <name>
+  workspace list` until it succeeds (5 s cap), not by checking a socket
+  file.
+- A new workflow, `.github/workflows/ci.yml`, runs on every push to
+  `main` and every pull request, on `ubuntu-latest`, `macos-latest`,
+  and `windows-latest`: `cargo fmt --check` (Ubuntu only), then clippy
+  with `-D warnings` and `cargo test --locked` on all three. Ubuntu and
+  macOS install tmux so its integration tests run.
+- Live Windows behavior is verified by the user with an
+  overseer-owned PowerShell smoke script,
+  `docs/windows-smoke.ps1`.
+
+### 13.4 Release
+
+dist adds the target `x86_64-pc-windows-msvc` and the `powershell`
+installer. `.cargo/config.toml` sets `-C target-feature=+crt-static` for
+that target, so the binary needs no Visual C++ runtime DLL. The version
+becomes 0.2.0. The README documents the Windows install, that Windows
+is Herdr-only, and that it assumes PowerShell panes.
