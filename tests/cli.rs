@@ -140,12 +140,20 @@ fn should_ignore_patterns_file_when_harness_is_herdr() {
 }
 
 #[test]
-fn should_exit_5_when_tmux_stub_reads() {
-    let output = md(&["--harness", "tmux", "pane", "read", "%1"]);
+fn should_exit_3_when_tmux_session_missing() {
+    let output = md(&[
+        "--harness",
+        "tmux",
+        "--session",
+        "md-test-absent-cli",
+        "pane",
+        "read",
+        "%1",
+    ]);
 
     assert_eq!(
         (output.status.code(), error_type(&output).as_str()),
-        (Some(5), "unsupported")
+        (Some(3), "harness_unavailable")
     );
 }
 
