@@ -161,7 +161,7 @@ impl Driver for Tmux {
             Some(ws) => ws.to_string(),
             None => self.default_workspace()?,
         };
-        let cwd = request.cwd.to_string_lossy();
+        let cwd = escape_semicolon(&request.cwd.to_string_lossy());
         let joined = shell_join(request.command);
         let name = escape_semicolon(request.name);
         let mut args = vec![
@@ -190,7 +190,7 @@ impl Driver for Tmux {
     }
 
     fn pane_split(&self, request: &SplitRequest<'_>) -> Result<Handle> {
-        let cwd = request.cwd.to_string_lossy();
+        let cwd = escape_semicolon(&request.cwd.to_string_lossy());
         let joined = shell_join(request.command);
         let flag = match request.direction {
             Direction::Right => "-h",

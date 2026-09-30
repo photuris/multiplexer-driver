@@ -407,3 +407,98 @@ fn should_exit_3_when_cli_raw_server_gone() {
     assert_eq!(output.status.code(), Some(3));
     assert_eq!(record["error"]["type"], "harness_unavailable");
 }
+
+/// A directory whose name ends as given, removed on drop.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    /// Creates `<tmp>/md-test-cwd-<pid>-<n>-<suffix>`.
+    fn new(suffix: &str) -> Self {
+        let name = format!(
+            "md-test-cwd-{}-{}-{suffix}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        );
+        let path = std::env::temp_dir().join(name);
+
+        fs::create_dir(&path)
+            .unwrap_or_else(|e| panic!("creating {path:?}: {e}"));
+
+        Self(fs::canonicalize(&path).unwrap_or(path))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.0); // best effort cleanup
+    }
+}
+
+/// The working directory tmux reports for `pane`, once it is known.
+fn pane_path(server: &Server, pane: &Handle) -> String {
+    let mut path = String::new();
+
+    eventually(|| {
+        path = server.tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            &pane.0,
+            "#{pane_current_path}",
+        ]);
+
+        !path.is_empty()
+    });
+
+    path
+}
+
+#[rstest]
+#[case::semicolon("cwd;")]
+#[case::backslash(r"cwd\;")]
+fn should_start_in_cwd_when_spawn_path_ends_with_semicolon(
+    #[case] suffix: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let dir = TempDir::new(suffix);
+    let command = cmd(&["sleep", "30"]);
+
+    let pane = driver
+        .pane_spawn(&SpawnRequest {
+            name: "cwd",
+            workspace: Some(&ws),
+            cwd: &dir.0,
+            command: &command,
+        })
+        .unwrap();
+
+    assert_eq!(pane_path(&server, &pane), dir.0.to_string_lossy());
+}
+
+#[rstest]
+#[case::semicolon("cwd;")]
+#[case::backslash(r"cwd\;")]
+fn should_start_in_cwd_when_split_path_ends_with_semicolon(
+    #[case] suffix: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let first = first_pane(&server);
+    let dir = TempDir::new(suffix);
+    let command = cmd(&["sleep", "30"]);
+
+    let pane = driver
+        .pane_split(&SplitRequest {
+            target: &first,
+            direction: Direction::Right,
+            name: "cwd",
+            cwd: &dir.0,
+            command: &command,
+        })
+        .unwrap();
+
+    assert_eq!(pane_path(&server, &pane), dir.0.to_string_lossy());
+}
