@@ -7,16 +7,23 @@ panes, and the agents that run in them. Every result is JSON.
 ## Install
 
 Prebuilt binaries are fully static on Linux (musl) and exist for Linux
-and macOS on x86_64 and aarch64. Install the latest release with:
+and macOS on x86_64 and aarch64, and for Windows on x86_64. Install the
+latest release on Linux or macOS with:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/photuris/multiplexer-driver/releases/latest/download/multiplexer-driver-installer.sh | sh
 ```
 
+On Windows, run this in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/photuris/multiplexer-driver/releases/latest/download/multiplexer-driver-installer.ps1 | iex"
+```
+
 Or download an archive from the
 [releases page](https://github.com/photuris/multiplexer-driver/releases/latest)
-and check it against `sha256.sum`. There is no Windows build.
+and check it against `sha256.sum`.
 
 To build from source (Rust 1.98 or later):
 
@@ -109,6 +116,16 @@ status is `unknown` and the confidence is `none`.
 **Herdr.** A handle is a Herdr pane ID such as `w1:p2`. Use `--session`
 to select a Herdr session. Herdr reports status natively, so the tool
 ignores `--patterns`.
+
+## Windows
+
+Windows supports Herdr only. tmux does not run natively on Windows, so
+`--harness tmux` fails with `harness_unavailable`. `pane run` quotes
+non-agent commands for PowerShell panes. A pane that runs `cmd.exe` will
+not parse them. The quoting rejects an argument that is empty, contains
+a double quote, or ends with a backslash, because Windows PowerShell 5.1
+mangles them. Run `docs/windows-smoke.ps1` inside Herdr to check an
+install.
 
 ## PowerShell
 
