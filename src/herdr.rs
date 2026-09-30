@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     env,
     io::{self, ErrorKind},
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
 };
 
@@ -18,13 +18,14 @@ use crate::{
         SessionRefKind, Status, StatusResult, WorkspaceRecord,
     },
     process::{CEILING, output_within},
-    text::{shell_join, trim_trailing_blank_lines},
+    text::trim_trailing_blank_lines,
 };
 
 /// Drives one Herdr server.
 #[derive(Debug)]
 pub struct Herdr {
-    /// Session name; `None` uses the ambient `HERDR_SOCKET_PATH`.
+    /// Session name; `None` lets the ambient environment pick the
+    /// server.
     session: Option<String>,
 }
 
@@ -36,32 +37,23 @@ impl Herdr {
     }
 
     /// Runs `herdr args…` under the ceiling and returns the raw
-    /// output. With a session, every `HERDR_*` variable is removed
-    /// from the child and `HERDR_SOCKET_PATH` is set to the session's
-    /// socket, so the caller's own session never leaks in (§4.4).
+    /// output. With a session, the command is `herdr --session <name>
+    /// args…` and every `HERDR_*` variable is removed from the child,
+    /// so the caller's own session never leaks in (§13.1).
     fn output<S: AsRef<str>>(&self, args: &[S]) -> Result<Output> {
         let mut command = Command::new("herdr");
 
-        command.args(args.iter().map(AsRef::as_ref));
-
         if let Some(name) = &self.session {
-            let socket = socket_path(name)?;
-
-            if !socket.exists() {
-                return Err(Error::HarnessUnavailable(format!(
-                    "herdr session {name:?}: no socket at {}",
-                    socket.display()
-                )));
-            }
+            command.args(["--session", name]);
 
             for (key, _) in env::vars_os() {
                 if key.to_string_lossy().starts_with("HERDR_") {
                     command.env_remove(key);
                 }
             }
-
-            command.env("HERDR_SOCKET_PATH", socket);
         }
+
+        command.args(args.iter().map(AsRef::as_ref));
 
         output_within(&mut command, CEILING).map_err(|e| spawn_error(&e))
     }
@@ -92,17 +84,20 @@ impl Herdr {
         })
     }
 
-    /// Starts `command` in the existing `pane` (§8.2). Every failure
-    /// here is [`Error::StartFailed`] carrying the pane.
+    /// Starts `command` in the existing `pane` (§8.2). `line` is the
+    /// shell line from [`launch_line`]; it is `None` for a known agent
+    /// kind. Every failure here is [`Error::StartFailed`] carrying the
+    /// pane.
     fn start_in_pane(
         &self,
         pane: &str,
         name: &str,
         command: &[String],
+        line: Option<&str>,
     ) -> Result<Handle> {
         let handle = Handle(pane.to_string());
 
-        self.start_command(pane, name, command).map_err(|e| {
+        self.start_command(pane, name, command, line).map_err(|e| {
             Error::StartFailed {
                 handle: handle.clone(),
                 message: e.to_string(),
@@ -118,18 +113,19 @@ impl Herdr {
         pane: &str,
         name: &str,
         command: &[String],
+        line: Option<&str>,
     ) -> Result<()> {
         let Some(first) = command.first() else {
             return Err(Error::Usage("a command is required".into()));
         };
 
-        if is_known_kind(first) {
+        let Some(line) = line else {
             self.run(&agent_start_args(name, first, pane, &command[1..]))?;
 
             return Ok(());
-        }
+        };
 
-        self.run(&["pane", "run", pane, &shell_join(command)])?;
+        self.run(&["pane", "run", pane, line])?;
         self.run(&["pane", "rename", pane, name])?;
 
         Ok(())
@@ -209,6 +205,7 @@ impl Driver for Herdr {
             return Err(Error::Usage("a command is required on herdr".into()));
         }
 
+        let line = launch_line(request.command)?;
         let workspace = match request.workspace {
             Some(ws) => ws.to_string(),
             None => env::var("HERDR_WORKSPACE_ID").map_err(|_| {
@@ -227,6 +224,7 @@ impl Driver for Herdr {
             &created.result.root_pane.pane_id,
             request.name,
             request.command,
+            line.as_deref(),
         )
     }
 
@@ -235,6 +233,7 @@ impl Driver for Herdr {
             return Err(Error::Usage("a command is required on herdr".into()));
         }
 
+        let line = launch_line(request.command)?;
         let split: PaneGet = self.run_json(&split_args(
             &request.target.0,
             request.direction,
@@ -245,6 +244,7 @@ impl Driver for Herdr {
             &split.result.pane.pane_id,
             request.name,
             request.command,
+            line.as_deref(),
         )
     }
 
@@ -299,13 +299,54 @@ impl Driver for Herdr {
         let output = self.output(&args)?;
 
         if !output.status.success() {
-            return Err(Error::Unexpected(
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            ));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+
+            return Err(match classify_error(stderr) {
+                err @ Error::HarnessUnavailable(_) => err,
+                _ => Error::Unexpected(stderr.to_string()),
+            });
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
+}
+
+/// The shell line `pane run` gets for `command`, built before any tab
+/// or pane exists so a rejected command creates nothing. `None` for a
+/// known agent kind, which `agent start` takes as argv.
+///
+/// # Errors
+///
+/// [`Error::Usage`] when `command` is empty, or (on Windows) when
+/// PowerShell cannot carry an argument.
+fn launch_line(command: &[String]) -> Result<Option<String>> {
+    match command.first() {
+        Some(first) if is_known_kind(first) => Ok(None),
+        _ => command_line(command).map(Some),
+    }
+}
+
+/// Renders `command` for the pane's shell: PowerShell on Windows
+/// (§13.2), POSIX elsewhere.
+///
+/// # Errors
+///
+/// [`Error::Usage`] when PowerShell cannot carry an argument.
+#[cfg(windows)]
+fn command_line(command: &[String]) -> Result<String> {
+    crate::text::powershell_join(command)
+}
+
+/// Renders `command` for the pane's shell: PowerShell on Windows
+/// (§13.2), POSIX elsewhere.
+///
+/// # Errors
+///
+/// Never fails on this platform.
+#[cfg(not(windows))]
+fn command_line(command: &[String]) -> Result<String> {
+    Ok(crate::text::shell_join(command))
 }
 
 /// Maps a subprocess failure to an [`Error`]: a missing binary, a
@@ -683,7 +724,9 @@ struct ErrorBody {
 /// Turns Herdr's stderr into an [`Error`]: the envelope becomes
 /// `"<code>: <message>"`, and exactly `pane_not_found`,
 /// `workspace_not_found`, and `agent_not_found` are
-/// [`Error::NotFound`]. Anything else is [`Error::Unexpected`].
+/// [`Error::NotFound`], and `server_not_running` is
+/// [`Error::HarnessUnavailable`]. Anything else is
+/// [`Error::Unexpected`].
 fn classify_error(stderr: &str) -> Error {
     let stderr = stderr.trim();
     let Ok(envelope) = serde_json::from_str::<ErrorEnvelope>(stderr) else {
@@ -696,6 +739,7 @@ fn classify_error(stderr: &str) -> Error {
         "pane_not_found" | "workspace_not_found" | "agent_not_found" => {
             Error::NotFound(text)
         }
+        "server_not_running" => Error::HarnessUnavailable(text),
         _ => Error::Unexpected(text),
     }
 }
@@ -709,39 +753,6 @@ fn map_status(raw: &str) -> Status {
         "blocked" => Status::Blocked,
         _ => Status::Unknown,
     }
-}
-
-/// The socket file of the Herdr session `session`.
-///
-/// # Errors
-///
-/// [`Error::HarnessUnavailable`] when neither `XDG_CONFIG_HOME` nor
-/// `HOME` is set.
-fn socket_path(session: &str) -> Result<PathBuf> {
-    let config = match env::var_os("XDG_CONFIG_HOME") {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join(".config"))
-            .ok_or_else(|| {
-                Error::HarnessUnavailable(
-                    "neither XDG_CONFIG_HOME nor HOME is set".into(),
-                )
-            })?,
-    };
-
-    Ok(socket_path_in(&config, session))
-}
-
-/// The socket file of `session` under the config directory `config`;
-/// the session `default` uses the root socket.
-fn socket_path_in(config: &Path, session: &str) -> PathBuf {
-    let root = config.join("herdr");
-
-    if session == "default" {
-        return root.join("herdr.sock");
-    }
-
-    root.join("sessions").join(session).join("herdr.sock")
 }
 
 #[cfg(test)]
@@ -770,6 +781,10 @@ mod tests {
         #[case::unknown_not_found(
             r#"{"error":{"code":"weird_not_found","message":"m"}}"#,
             "unexpected"
+        )]
+        #[case::server_down(
+            r#"{"error":{"code":"server_not_running","message":"m"}}"#,
+            "harness_unavailable"
         )]
         #[case::not_json("boom", "unexpected")]
         fn should_classify_by_code(#[case] stderr: &str, #[case] kind: &str) {
@@ -921,28 +936,6 @@ mod tests {
             #[case] expected: Status,
         ) {
             assert_eq!(map_status(raw), expected);
-        }
-    }
-
-    mod socket_path {
-        use super::*;
-
-        #[test]
-        fn should_use_sessions_dir_when_named() {
-            let path = socket_path_in(Path::new("/c"), "personal");
-
-            assert_eq!(
-                path,
-                PathBuf::from("/c/herdr/sessions/personal/herdr.sock")
-            );
-        }
-
-        #[test]
-        fn should_use_root_socket_when_default() {
-            assert_eq!(
-                socket_path_in(Path::new("/c"), "default"),
-                PathBuf::from("/c/herdr/herdr.sock")
-            );
         }
     }
 
