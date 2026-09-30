@@ -18,7 +18,7 @@ use crate::{
         SessionRefKind, Status, StatusResult, WorkspaceRecord,
     },
     process::{CEILING, output_within},
-    text::{shell_join, trim_trailing_blank_lines},
+    text::trim_trailing_blank_lines,
 };
 
 /// Drives one Herdr server.
@@ -346,7 +346,7 @@ fn command_line(command: &[String]) -> Result<String> {
 /// Never fails on this platform.
 #[cfg(not(windows))]
 fn command_line(command: &[String]) -> Result<String> {
-    Ok(shell_join(command))
+    Ok(crate::text::shell_join(command))
 }
 
 /// Maps a subprocess failure to an [`Error`]: a missing binary, a
