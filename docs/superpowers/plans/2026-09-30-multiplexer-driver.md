@@ -57,6 +57,203 @@ this plan and the spec disagree, the spec wins; report the conflict.
 - Never launch a paid agent CLI (claude, codex, pi, …) in any test.
   Use `bash` or `sleep`.
 
+## Amendments (plan critic round, 2026-09-30)
+
+These amend the tasks below. Where an amendment and a task step
+disagree, the amendment wins. IDs match `.overseer/review/plan.md`.
+
+### Task 1
+
+- **A1-1 (P-03) `src/process.rs`, new module, add `pub mod process;`
+  to `lib.rs`.** Every harness subprocess runs through it with a hard
+  ceiling, so no call can hang:
+
+```rust
+//! Runs harness subprocesses with a hard time ceiling so no call can
+//! hang (§4.2).
+
+use std::{
+    io::{self, Read},
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+/// Longest any single harness subprocess may run.
+pub const CEILING: Duration = Duration::from_secs(30);
+
+/// Runs `command` to completion and collects its output, killing it
+/// and returning an [`io::ErrorKind::TimedOut`] error past `limit`.
+///
+/// # Errors
+///
+/// Spawn failures (e.g. [`io::ErrorKind::NotFound`] for a missing
+/// binary), wait failures, and the timeout above.
+pub fn output_within(command: &mut Command, limit: Duration) -> io::Result<Output> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let out_reader = thread::spawn(move || read_all(stdout));
+    let err_reader = thread::spawn(move || read_all(stderr));
+    let deadline = Instant::now() + limit;
+
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+
+        if Instant::now() >= deadline {
+            let _ = child.kill(); // already past the ceiling; best effort
+            let _ = child.wait(); // reap; the result changes nothing
+
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("no exit within {limit:?}"),
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    Ok(Output {
+        status,
+        stdout: out_reader.join().unwrap_or_default(),
+        stderr: err_reader.join().unwrap_or_default(),
+    })
+}
+
+/// Reads a child pipe to its end; a missing pipe or read error gives
+/// what was read so far.
+fn read_all(pipe: Option<impl Read>) -> Vec<u8> {
+    let mut buffer = Vec::new();
+
+    if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_end(&mut buffer); // partial output is still useful
+    }
+
+    buffer
+}
+```
+
+  Unit tests: `should_capture_stdout_when_child_exits` (`sh -c 'echo
+  hi'` → stdout `hi\n`, success) and `should_kill_when_child_outlives_limit`
+  (`sleep 5`, limit 100 ms → `ErrorKind::TimedOut`, elapsed < 2 s).
+  Both drivers call `output_within(&mut cmd, process::CEILING)`.
+  `TimedOut` maps to `HarnessUnavailable("<harness> timed out: …")`,
+  `NotFound` to `HarnessUnavailable("<harness> is not installed")`.
+
+- **A1-2 (P-02, P-04):** `wait_for` in Step 6 is already fixed in
+  place, with 7 tests. Use it exactly.
+
+### Task 2
+
+- **A2-1 (P-06):** in `run`, load `--patterns` only when the harness is
+  tmux. On Herdr the flag is accepted and ignored, even if the file is
+  missing or invalid. Test in `tests/cli.rs`: `--harness herdr pane
+  status w1:p1 --patterns /nonexistent` must not exit 2 (it exits 5
+  from the stub today; any code but 2 passes).
+- **A2-2 (P-15):** `log_level`: `#[arg(long, global = true, env =
+  "RUST_LOG", default_value = "warn")]`. The flag beats the variable.
+- **A2-3 (P-16):** `sound`: `#[arg(long, value_parser = ["none",
+  "done", "request"])]`. Test: `notify --message m --sound loud` →
+  exit 2 with a `usage` record.
+- **A2-4 (P-18):** the two name-only `impl Driver` stubs in `tmux.rs`
+  and `herdr.rs` are the required exception to the no-stubs rule.
+- **A2-5 (P-09, exit 6):** factor spawn/split printing into
+  `fn print_start(out: &mut dyn Write, outcome: Result<Handle>) ->
+  Result<()>` in `lib.rs`: `Ok(h)` prints `{"handle":h,"started":true}`,
+  `Err(StartFailed{handle,..})` prints `{"handle":handle,"started":false}`
+  and returns the error, any other `Err` prints nothing and returns
+  it. Unit tests for all three branches assert the exact stdout bytes.
+- **A2-6 (P-17):** every verb's doc comment states its output shape in
+  one sentence and one runnable example (`Example: multiplexer-driver
+  …`). `pane read` help also carries the note from spec §7.2 that the
+  reset code closing a dim run can land at the start of the next line
+  (the text must contain the word "reset"). Snapshot the help of every
+  noun and every verb with one `rstest` table in `tests/cli.rs` (4
+  noun-level + 16 verb-level cases).
+- **A2-7 (P-04):** `parse_duration` is fixed in place (checked
+  multiplication, overflow cases added). Also map an overflowing
+  `u64` parse to the same error.
+
+### Tasks 3 and 4 (tmux)
+
+- **A3-1 (P-03):** `run_once` uses `process::output_within` (A1-1).
+- **A3-2 (P-07):** add `fn is_no_server(stderr: &str) -> bool`: true
+  for `no server running…`, and for `error connecting to …` only when
+  the text contains `No such file or directory` or `Connection
+  refused`. `classify_error` still maps all `error connecting to`
+  text to `HarnessUnavailable`. `workspace_list` and `pane_list`
+  return `Ok(vec![])` only when the error message satisfies
+  `is_no_server`. A missing binary stays `HarnessUnavailable`.
+  Unit cases: both no-server texts → true; `error connecting to
+  /x (Permission denied)` → false.
+- **A3-3 (P-05):** `raw` runs through a lower-level `fn output(&self,
+  args) -> Result<Output>` (session applied, ceiling applied, spawn
+  failures mapped). A nonzero exit becomes `Unexpected(<stderr>)`,
+  never `NotFound` or `Usage`. `run` is `output` plus
+  `classify_error`. Integration test
+  `should_fail_unexpected_when_raw_command_fails`: `raw(["kill-pane",
+  "-t", "%999"])` → kind `unexpected`.
+- **A3-4 (P-08):** `Server::start` returns `None` (skip) only when
+  spawning tmux fails with `io::ErrorKind::NotFound`. Any other
+  startup failure panics with the captured stderr. Record the socket
+  path at start (`display-message -p '#{socket_path}'`), and in `Drop`
+  run `kill-server` and then `fs::remove_file(socket_path)` (tmux
+  leaves the socket file behind, verified). The absent-server test in
+  Task 4 also skips when tmux is not installed.
+- **A4-1 (P-14):** tags: `show-options -t <id>` gives only the key
+  names (`fn parse_tag_keys(&str) -> Vec<String>`, keep names starting
+  `@md-tag-`, strip the prefix). Read each value with `show-options -v
+  -t <id> @md-tag-<k>` and trim exactly one trailing `\n`. Unquoted
+  `show-options` output escapes values (verified: `a"b\c d` prints as
+  `"a\"b\\c d"`), so never parse values from it. Replace the
+  `parse_tags` unit test with a `parse_tag_keys` test, and add
+  integration test `should_round_trip_tag_values_when_escaped` with the
+  values `a"b\c d`, `it's`, and the empty string.
+- **A4-2 (P-09):** add subprocess tests to `tests/tmux.rs` that run the
+  built binary (`env!("CARGO_BIN_EXE_multiplexer-driver")`) against the
+  private server: `should_exit_4_when_cli_reads_missing_pane`,
+  `should_exit_7_when_cli_wait_times_out` (patterns file that never
+  matches, `--timeout 300ms`), and `should_print_jsonl_when_cli_lists_panes`
+  (with `--pretty`: every stdout line parses as one JSON object, no
+  line starts with `[`, line count equals the pane count). Assert the
+  last stderr line's `error.type` for the two error tests.
+
+### Tasks 5 and 6 (Herdr)
+
+- **A5-1 (P-03):** `run` uses `process::output_within` (A1-1).
+- **A5-2 (P-11, also spec §4.4):** when `session` is `Some`, remove
+  every environment variable whose name starts with `HERDR_` from the
+  child (`env::vars()` filtered by prefix, `env_remove` each), then set
+  `HERDR_SOCKET_PATH`. The test harness does the same for the server
+  and for its own direct `herdr` calls: remove all `HERDR_*`, not a
+  fixed list.
+- **A5-3 (P-10):** `classify_error` maps exactly `pane_not_found`,
+  `workspace_not_found`, `agent_not_found` to `NotFound`. Add case
+  `#[case::unknown_not_found(r#"{"error":{"code":"weird_not_found","message":"m"}}"#, "unexpected")]`.
+- **A5-4 (P-05):** as A3-3: `raw` maps a nonzero exit to
+  `Unexpected(<stderr>)`.
+- **A5-5 (P-12):** scenario 1 runs `["bash", "-c", "echo
+  hello-$((40+2)); exec bash"]` and asserts a line equal to `hello-42`
+  in the read output (the typed command holds `$((40+2))`, not `42`).
+- **A5-6 (P-09, P-11):** four more scenarios in Task 5 (12 in total):
+  `should_route_only_to_test_session` (the driver's `raw(["pane",
+  "list"])` output does not contain the value of the ambient
+  `HERDR_PANE_ID`, when that variable is set in the test process),
+  `should_fail_unexpected_when_raw_command_fails` (`raw(["pane",
+  "get", "<ws>:p99"])` → `unexpected`),
+  `should_exit_3_when_cli_session_missing` (binary with `--harness
+  herdr --session md-test-absent-<pid> pane read w1:p1` → exit 3,
+  last stderr `harness_unavailable`), and
+  `should_exit_4_when_cli_reads_missing_pane` (binary with the test
+  session, `pane read <ws>:p99` → exit 4). Task 6 then adds its 4, so
+  16 in total.
+
 ## File map
 
 | File | Responsibility | Task |
@@ -67,6 +264,7 @@ this plan and the spec disagree, the spec wins; report the conflict.
 | `src/text.rs` | blank-line trim, shell join | 1 |
 | `src/patterns.rs` | patterns file load + classify | 1 |
 | `src/agents.rs` | known kinds, resume argv | 1 |
+| `src/process.rs` | subprocess with hard ceiling | 1 |
 | `src/lib.rs` | crate docs, module list, `Harness`, `driver_for`, `run` | 1 (modules), 2 (run) |
 | `src/cli.rs` | clap definitions, duration parser | 2 |
 | `src/notify.rs` | notify | 2 |
@@ -646,14 +844,16 @@ pub trait Driver {
     }
 }
 
-/// Polls [`Driver::pane_status`] every `interval` until the status is
-/// in `until`, and returns that result.
+/// Polls [`Driver::pane_status`] every `interval` (never sleeping past
+/// the deadline) until the status is in `until`, and returns that
+/// result. A result that arrives after the deadline is a timeout, even
+/// when it matches.
 ///
 /// # Errors
 ///
 /// [`Error::Usage`] when the status has no signal (`Confidence::None`,
-/// e.g. tmux without patterns), [`Error::Timeout`] past `timeout`, and
-/// any error from `pane_status`.
+/// e.g. tmux without patterns) or `timeout` overflows the clock,
+/// [`Error::Timeout`] past `timeout`, and any error from `pane_status`.
 pub fn wait_for(
     driver: &dyn Driver,
     target: &Handle,
@@ -661,7 +861,9 @@ pub fn wait_for(
     timeout: Duration,
     interval: Duration,
 ) -> Result<StatusResult> {
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+        Error::Usage(format!("--timeout {timeout:?} is too large"))
+    })?;
 
     loop {
         let result = driver.pane_status(target)?;
@@ -673,17 +875,19 @@ pub fn wait_for(
             )));
         }
 
-        if until.contains(&result.status) {
-            return Ok(result);
-        }
+        let now = Instant::now();
 
-        if Instant::now() + interval > deadline {
+        if now > deadline {
             return Err(Error::Timeout(format!(
                 "{target} did not reach {until:?} within {timeout:?}"
             )));
         }
 
-        thread::sleep(interval);
+        if until.contains(&result.status) {
+            return Ok(result);
+        }
+
+        thread::sleep(interval.min(deadline - now));
     }
 }
 ```
@@ -701,6 +905,8 @@ mod tests {
     struct Scripted {
         /// Statuses to return, in order; the last one repeats.
         script: RefCell<Vec<(Status, Confidence)>>,
+        /// How long each `pane_status` call takes.
+        delay: Duration,
     }
 
     impl Driver for Scripted {
@@ -709,6 +915,8 @@ mod tests {
         }
 
         fn pane_status(&self, target: &Handle) -> Result<StatusResult> {
+            thread::sleep(self.delay);
+
             let mut script = self.script.borrow_mut();
             let (status, confidence) = if script.len() > 1 {
                 script.remove(0)
@@ -727,7 +935,10 @@ mod tests {
 
     /// Builds a [`Scripted`] driver.
     fn scripted(script: Vec<(Status, Confidence)>) -> Scripted {
-        Scripted { script: RefCell::new(script) }
+        Scripted {
+            script: RefCell::new(script),
+            delay: Duration::ZERO,
+        }
     }
 
     mod error {
@@ -805,6 +1016,63 @@ mod tests {
         }
 
         #[test]
+        fn should_time_out_near_deadline_when_timeout_below_interval() {
+            let driver = scripted(vec![(Status::Working, Confidence::Native)]);
+            let started = Instant::now();
+
+            let err = wait_for(
+                &driver,
+                &Handle("p".into()),
+                &[Status::Idle],
+                Duration::from_millis(30),
+                Duration::from_millis(500),
+            )
+            .unwrap_err();
+
+            assert!(
+                matches!(err, Error::Timeout(_))
+                    && started.elapsed() < Duration::from_millis(250),
+                "got {err:?} after {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn should_time_out_when_match_arrives_after_deadline() {
+            let driver = Scripted {
+                script: RefCell::new(vec![(Status::Idle, Confidence::Native)]),
+                delay: Duration::from_millis(60),
+            };
+
+            let err = wait_for(
+                &driver,
+                &Handle("p".into()),
+                &[Status::Idle],
+                Duration::from_millis(20),
+                Duration::from_millis(5),
+            )
+            .unwrap_err();
+
+            assert!(matches!(err, Error::Timeout(_)), "got {err:?}");
+        }
+
+        #[test]
+        fn should_fail_usage_when_timeout_overflows() {
+            let driver = scripted(vec![(Status::Idle, Confidence::Native)]);
+
+            let err = wait_for(
+                &driver,
+                &Handle("p".into()),
+                &[Status::Idle],
+                Duration::MAX,
+                Duration::from_millis(5),
+            )
+            .unwrap_err();
+
+            assert!(matches!(err, Error::Usage(_)), "got {err:?}");
+        }
+
+        #[test]
         fn should_fail_usage_when_status_has_no_signal() {
             let driver = scripted(vec![(Status::Unknown, Confidence::None)]);
 
@@ -824,7 +1092,7 @@ mod tests {
 ```
 
 Run: `cargo test --locked driver::`
-Expected: PASS (4 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 7: Write `src/text.rs` test-first**
 
@@ -1431,7 +1699,10 @@ pub fn parse_duration(text: &str) -> Result<Duration, String> {
     match unit {
         "ms" => Ok(Duration::from_millis(n)),
         "s" => Ok(Duration::from_secs(n)),
-        "m" => Ok(Duration::from_secs(n * 60)),
+        "m" => n
+            .checked_mul(60)
+            .map(Duration::from_secs)
+            .ok_or_else(|| format!("{text:?}: too large")),
         _ => Err(format!("{text:?}: unit must be ms, s, or m")),
     }
 }
@@ -1470,6 +1741,8 @@ mod tests {
         #[case::no_unit("60")]
         #[case::bad_unit("5h")]
         #[case::no_number("s")]
+        #[case::minutes_overflow("307445734561825861m")]
+        #[case::number_overflow("99999999999999999999s")]
         fn should_fail_when_text_invalid(#[case] text: &str) {
             assert!(parse_duration(text).is_err(), "accepted {text:?}");
         }

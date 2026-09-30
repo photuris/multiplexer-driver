@@ -74,6 +74,7 @@ src/
   tmux.rs     tmux driver
   agents.rs   shared agent knowledge: Herdr kinds, resume-args table
   patterns.rs status patterns file: load, compile, classify a tail
+  process.rs  run a subprocess with a hard time ceiling
   notify.rs   notify (harness-independent)
   text.rs     trim trailing blank lines, POSIX shell quoting
 tests/
@@ -109,7 +110,14 @@ call within `rust-style`):
 `pane_wait` is one shared function in `driver.rs`, not a per-driver
 method: it calls `pane_status` every 500 ms until the status is in the
 `--until` set, and fails with `timeout` past the deadline. It works for
-every harness that implements `pane_status`.
+every harness that implements `pane_status`. It sleeps no longer than
+the time left, and a result that arrives after the deadline is a
+timeout even when it matches.
+
+Every harness subprocess runs with a hard 30 s ceiling
+(`process.rs`). A call past it is killed and reported as
+`harness_unavailable`. So no command can hang, and `pane wait` can
+overrun its deadline by at most one bounded status call.
 
 Each driver keeps its subprocess call in one private helper (run, and
 run-and-parse-JSON). Argv construction and output parsing live in pure
@@ -130,6 +138,9 @@ use. Without it, the ambient server is used, as the environment
 already selects it.
 
 - **Herdr:** set `HERDR_SOCKET_PATH` on every `herdr` child process.
+  Before that, remove every `HERDR_*` variable from the child
+  environment, so the caller's own session, workspace, and pane
+  variables never leak into a call aimed at another session.
   The path is `$XDG_CONFIG_HOME/herdr/sessions/<name>/herdr.sock`
   (`$XDG_CONFIG_HOME` defaults to `~/.config`). The name `default`
   maps to `$XDG_CONFIG_HOME/herdr/herdr.sock`. If the socket file does
@@ -172,7 +183,7 @@ live check of that tool's help.
 | `--harness <tmux\|herdr>` | `MULTIPLEXER_DRIVER_HARNESS` | Required for driver-backed commands |
 | `--session <name>`      | `MULTIPLEXER_DRIVER_SESSION`  | See 4.4 |
 | `--pretty`              |                               | Indent single-object output. Lists stay JSONL |
-| `--log-level <l>`       | `RUST_LOG` semantics          | `debug`, `info`, `warn` (default), `error`; stderr only |
+| `--log-level <l>`       | `RUST_LOG`                    | `debug`, `info`, `warn` (default), `error`; stderr only |
 | `--version`, `--help`   |                               | stdout, exit 0 |
 
 Flags beat environment variables. `--harness` and `--session` are
@@ -211,7 +222,8 @@ Rules:
 - `--cwd` defaults to the caller's current directory for `spawn`,
   `split`, and `workspace create`.
 - `--timeout` takes a duration: an integer with `ms`, `s`, or `m`
-  (`500ms`, `60s`, `5m`). It is required. `wait` must never hang.
+  (`500ms`, `60s`, `5m`). It is required. `wait` must never hang. A
+  value that overflows is a usage error.
 - `--until` repeats. Values: `idle`, `working`, `blocked`. Default:
   `idle` and `blocked`.
 - `--text`, `--label`, `--name`, and `--message` must be non-empty.
@@ -219,8 +231,11 @@ Rules:
 - `workspace tag` with no `key=value` and no `--clear` is a usage
   error. Keys match `^[A-Za-z0-9_-]+$`.
 - `raw` runs the harness binary with the arguments after `--`, with
-  session selection applied, and prints its stdout unchanged. Harness
-  failure maps to exit 1 with the harness stderr in the message. `raw`
+  session selection applied, and prints its stdout unchanged. A
+  nonzero harness exit maps to `unexpected` (exit 1) with the harness
+  stderr in the message, never to `not_found` or `usage`. A binary
+  that cannot start, a missing session socket, or the time ceiling is
+  `harness_unavailable`. `raw`
   is the escape hatch for anything without a subcommand.
 - `agent` is a noun for future agent-level commands. `resume-args`
   is its only verb now.
@@ -387,7 +402,11 @@ Every call is `tmux [-L <session>] <subcommand> …`.
 - **workspace close:** `kill-session -t <id>`.
 - **workspace tag:** `set-option -t <id> @md-tag-<k> <v>` per pair,
   `set-option -u -t <id> @md-tag-<k>` per `--clear`. Return the
-  resulting tags (read back).
+  resulting tags (read back). Read tags by taking the key names from
+  `show-options -t <id>` and each value from `show-options -v -t <id>
+  @md-tag-<k>`. Plain `show-options` quotes and escapes values
+  (verified: `a"b\c d` prints as `"a\"b\\c d"`), so never parse
+  values from it.
 - **pane list:** `list-panes -a -F` (or `-s -t <ws>` with a filter)
   with a tab-separated format: `#{pane_id}`, `#{session_id}`,
   `#{session_name}`, `#{window_id}`, `#{window_name}`, `#{@md-label}`,
@@ -447,7 +466,9 @@ A server that is not running shows up as `no server running on
 <socket>` or, on tmux 3.7 when the socket file is absent, `error
 connecting to <socket> (No such file or directory)`. Both mean an empty
 result for `workspace list` and `pane list`, and `harness_unavailable`
-for everything else. Other captured strings: `can't find pane: %99`,
+for everything else. Only these two no-server forms give an empty list:
+`error connecting to` with another cause (permission denied, say) and a
+missing tmux binary stay `harness_unavailable` for lists too. Other captured strings: `can't find pane: %99`,
 `can't find session: $99`, `can't find window: …` (all `not_found`),
 `duplicate session: ws` (`usage`).
 
@@ -559,7 +580,8 @@ Reaches the user, not an agent. It does not use `--harness`.
 4. Else `{"sent":false,"method":"none","reason":null}`, exit 0.
    Nothing available is a normal outcome, not an error.
 
-`--sound` values: `none`, `done`, `request`. Only Herdr uses it.
+`--sound` values: `none`, `done`, `request`, validated by the parser
+(anything else is a usage error). Only Herdr uses it.
 
 ## 10. Testing
 
@@ -571,9 +593,11 @@ Reaches the user, not an agent. It does not use `--harness`.
 - **CLI (`tests/cli.rs`):** exit code and error record per error type,
   JSONL shape, help snapshots (`insta`), no BOM and no `\r` in output.
 - **tmux integration (`tests/tmux.rs`):** each test starts a private
-  server with `-L md-test-<pid>-<n>` and kills it at the end. Tests
-  never touch the user's default tmux server. They run on every
-  `cargo test` when `tmux` is on PATH, and skip otherwise.
+  server with `-L md-test-<pid>-<n>`. At the end it kills the server
+  and removes the socket file, which tmux leaves behind (verified).
+  Tests never touch the user's default tmux server. They skip only
+  when the `tmux` binary is not installed. Any other startup failure
+  fails the test.
 - **Herdr integration (`tests/herdr.rs`):** each test binary starts
   its own headless server, `herdr --session md-test-<pid> server`, in
   the background, with every `HERDR_*` variable removed from its
