@@ -21,6 +21,7 @@ use multiplexer_driver::{
     driver::{Driver, SpawnRequest, SplitRequest},
     herdr::Herdr,
     model::{Confidence, Direction, Handle, Status},
+    text::shell_join,
 };
 use serde_json::Value;
 
@@ -261,9 +262,12 @@ fn startup_never_touches_foreign_session() {
 
     fs::create_dir_all(&session).expect("create fake config");
     fs::write(session.join("herdr.sock"), "").expect("fake socket");
+    // POSIX-quoted, so a TMPDIR with spaces or quotes stays one word.
+    let quoted_log = shell_join(&[log.to_string_lossy().into_owned()]);
+
     fs::write(
         &fake,
-        format!("#!/bin/sh\necho \"$@\" >> {}\nexit 1\n", log.display()),
+        format!("#!/bin/sh\necho \"$@\" >> {quoted_log}\nexit 1\n"),
     )
     .expect("write fake herdr");
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))
