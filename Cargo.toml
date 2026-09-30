@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.98"
 description = "Drive tmux and Herdr workspaces, panes, and coding agents from one JSON CLI"
 license = "MIT"
+repository = "https://github.com/photuris/multiplexer-driver"
+homepage = "https://github.com/photuris/multiplexer-driver"
+readme = "README.md"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
@@ -29,3 +32,17 @@ missing_docs_in_private_items = "warn"
 missing_errors_doc = "warn"
 missing_panics_doc = "warn"
 unwrap_used = "deny"
+
+# Smallest binary: nothing here is hot, since every command waits on a
+# harness subprocess. `panic = "abort"` is safe because nothing catches
+# unwinds (tests build with unwinding regardless).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"

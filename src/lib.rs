@@ -131,7 +131,7 @@ fn dispatch(
         Command::Raw { args } => {
             let stdout = driver.raw(&args)?;
 
-            out.write_all(stdout.as_bytes()).map_err(io_error)
+            written(out.write_all(stdout.as_bytes()))
         }
         Command::Notify(_) | Command::Agent(_) => Err(Error::Unexpected(
             "harness-free command reached the driver".into(),
@@ -404,7 +404,7 @@ fn print_one(
     }
     .map_err(|e| Error::Unexpected(format!("encoding output: {e}")))?;
 
-    writeln!(out, "{text}").map_err(io_error)
+    written(writeln!(out, "{text}"))
 }
 
 /// Writes one compact JSON document per line, ignoring `--pretty`.
@@ -416,9 +416,14 @@ fn print_lines(out: &mut dyn Write, items: &[impl Serialize]) -> Result<()> {
     Ok(())
 }
 
-/// Maps a failed write to stdout to [`Error::Unexpected`].
-fn io_error(e: std::io::Error) -> Error {
-    Error::Unexpected(format!("writing output: {e}"))
+/// Maps a failed write to stdout to [`Error::Unexpected`]. A closed
+/// reader (`| head -1`) is success: the caller has all it wants.
+fn written(result: std::io::Result<()>) -> Result<()> {
+    match result {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(Error::Unexpected(format!("writing output: {e}"))),
+        Ok(()) => Ok(()),
+    }
 }
 
 #[cfg(test)]
