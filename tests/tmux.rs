@@ -748,6 +748,23 @@ fn should_reject_label_and_keep_stored_one_when_it_holds_control_char(
     assert_eq!((err.kind(), stored.as_str()), ("usage", "kept"));
 }
 
+/// Whether `tmux -V` reports 3.7 or later; older tmux prints a CR in a
+/// format as the two characters `\r`. Letters after the number are fine.
+fn tmux_has_raw_cr() -> bool {
+    let out = Command::new("tmux").arg("-V").output();
+    let text = out
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let version: String = text
+        .trim_start_matches("tmux ")
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+
+    (parts.next().unwrap_or(0), parts.next().unwrap_or(0)) >= (3, 7)
+}
+
 #[rstest]
 #[case::tab("a\tb")]
 #[case::newline("a\nb")]
@@ -756,6 +773,12 @@ fn should_reject_label_and_keep_stored_one_when_it_holds_control_char(
 fn should_list_exact_cwd_when_directory_name_holds_delimiter(
     #[case] dirname: &str,
 ) {
+    if dirname.contains('\r') && !tmux_has_raw_cr() {
+        eprintln!("skipping: tmux before 3.7 escapes CR in formats");
+
+        return;
+    }
+
     let server = server!();
     let driver = server.driver();
     let ws =
