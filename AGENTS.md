@@ -12,8 +12,9 @@
   another without a reason in the commit message.
 - Set `max_width = 79` in `rustfmt.toml`. Do not use `unwrap`, `expect`,
   or `panic!` outside tests.
-- Give every item a doc comment, private items too. Add `# Errors` to
-  every public function that returns `Result`.
+- Give every item a doc comment, private items too. Test modules and
+  test functions are the exception: their `should_…` names document
+  them. Add `# Errors` to every public function that returns `Result`.
 - Put a blank line before every control statement, `return`, and tail
   expression, unless it is first in its block.
 - Name tests `should_<expected>_when_<state>` inside `mod <unit>`.
