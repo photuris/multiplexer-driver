@@ -727,3 +727,63 @@ fn should_print_jsonl_when_cli_lists_panes() {
 
     assert_eq!((code, lines.len(), all_objects), (0, 2, true));
 }
+
+#[rstest]
+#[case::tab("a\tb")]
+#[case::newline("a\nb")]
+fn should_reject_label_and_keep_stored_one_when_it_holds_control_char(
+    #[case] label: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let pane = first_pane(&server);
+    driver.pane_rename(&pane, "kept").unwrap();
+
+    let err = driver.pane_rename(&pane, label).unwrap_err();
+    let stored =
+        server.tmux(&["display-message", "-p", "-t", &pane.0, "#{@md-label}"]);
+
+    assert_eq!((err.kind(), stored.as_str()), ("usage", "kept"));
+}
+
+#[rstest]
+#[case::tab("a\tb")]
+#[case::newline("a\nb")]
+fn should_list_exact_cwd_when_directory_name_holds_delimiter(
+    #[case] dirname: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let dir = std::env::temp_dir().join(format!(
+        "md-test-cwd-{}-{}-{dirname}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::create_dir(&dir).unwrap();
+    let command = cmd(&["sleep", "30"]);
+    let handle = driver
+        .pane_spawn(&SpawnRequest {
+            name: "cwd",
+            workspace: Some(&ws),
+            cwd: &dir,
+            command: &command,
+        })
+        .unwrap();
+    let want = dir.to_string_lossy().into_owned();
+    let cwd_of = |panes: Vec<multiplexer_driver::model::PaneRecord>| {
+        panes
+            .into_iter()
+            .find(|p| p.handle == handle)
+            .and_then(|p| p.cwd)
+    };
+
+    let found = eventually(|| {
+        cwd_of(driver.pane_list(None).unwrap()).as_deref() == Some(&want)
+    });
+    let filtered = cwd_of(driver.pane_list(Some(&ws)).unwrap());
+    let _ = fs::remove_dir(&dir); // best effort
+
+    assert_eq!((found, filtered), (true, Some(want)));
+}

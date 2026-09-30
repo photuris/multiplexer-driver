@@ -25,10 +25,16 @@ use crate::{
 /// The pane format every pane-creating command prints.
 const PANE_ID: &str = "#{pane_id}";
 
-/// `list-panes` format: one tab-separated line per pane.
+/// `list-panes` format: one tab-separated line per pane. The working
+/// directory comes last because it is the one field that may hold tabs
+/// and newlines (`parse_panes` rejoins them); labels and names cannot
+/// (`check_text`).
 const PANE_FORMAT: &str = "#{pane_id}\t#{session_id}\t#{session_name}\t\
-#{window_id}\t#{window_name}\t#{@md-label}\t#{pane_current_path}\t\
-#{@md-agent}\t#{pane_current_command}";
+#{window_id}\t#{window_name}\t#{@md-label}\t#{@md-agent}\t\
+#{pane_current_command}\t#{pane_current_path}";
+
+/// Fields in a [`PANE_FORMAT`] row.
+const PANE_FIELDS: usize = 9;
 
 /// `list-sessions` format: ID, name, attached-client count.
 const SESSION_FORMAT: &str =
@@ -229,6 +235,8 @@ impl Driver for Tmux {
         label: &str,
         cwd: &Path,
     ) -> Result<WorkspaceRecord> {
+        check_text("workspace label", label)?;
+
         let name = escape_semicolon(label);
         let cwd = escape_semicolon(&cwd.to_string_lossy());
         let id = self.run(&[
@@ -296,6 +304,8 @@ impl Driver for Tmux {
     }
 
     fn pane_spawn(&self, request: &SpawnRequest<'_>) -> Result<Handle> {
+        check_text("name", request.name)?;
+
         let workspace = match request.workspace {
             Some(ws) => ws.to_string(),
             None => self.default_workspace()?,
@@ -329,6 +339,8 @@ impl Driver for Tmux {
     }
 
     fn pane_split(&self, request: &SplitRequest<'_>) -> Result<Handle> {
+        check_text("name", request.name)?;
+
         let cwd = escape_semicolon(&request.cwd.to_string_lossy());
         let joined = shell_join(request.command);
         let flag = match request.direction {
@@ -393,6 +405,8 @@ impl Driver for Tmux {
     }
 
     fn pane_rename(&self, target: &Handle, label: &str) -> Result<()> {
+        check_text("label", label)?;
+
         self.set_pane_option(&target.0, "@md-label", label)?;
         let title = escape_semicolon(label);
 
@@ -483,13 +497,56 @@ fn non_empty(field: &str) -> Option<String> {
     (!field.is_empty()).then(|| field.to_string())
 }
 
+/// Strips leading ASCII digits from `text`; `None` when there are none.
+fn skip_digits(text: &str) -> Option<&str> {
+    let n = text.bytes().take_while(u8::is_ascii_digit).count();
+
+    (n > 0).then(|| &text[n..])
+}
+
+/// True when `line` starts a pane row: `%<digits>\t$<digits>\t`.
+fn is_row_start(line: &str) -> bool {
+    line.strip_prefix('%')
+        .and_then(skip_digits)
+        .and_then(|r| r.strip_prefix("\t$"))
+        .and_then(skip_digits)
+        .is_some_and(|r| r.starts_with('\t'))
+}
+
+/// Rejects control characters in a label or name. tmux refuses them in
+/// window names, and they would break the line-based listing (§7.2).
+fn check_text(what: &str, text: &str) -> Result<()> {
+    if text.chars().any(char::is_control) {
+        return Err(Error::Usage(format!(
+            "{what} {text:?} contains a control character"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Parses `list-panes` output in [`PANE_FORMAT`]. Status and session
-/// are never known from listing alone (§7.2).
+/// are never known from listing alone (§7.2). The working directory is
+/// the last field, so tabs in it survive the split, and a line that
+/// does not start a row continues the previous cwd after a newline.
 fn parse_panes(output: &str) -> Vec<PaneRecord> {
+    let mut rows: Vec<String> = Vec::new();
+
+    for line in output.lines() {
+        match rows.last_mut() {
+            Some(row) if !is_row_start(line) => {
+                row.push('\n');
+                row.push_str(line);
+            }
+            _ if line.is_empty() => {}
+            _ => rows.push(line.to_string()),
+        }
+    }
+
     let mut records = Vec::new();
 
-    for line in output.lines().filter(|l| !l.is_empty()) {
-        let fields: Vec<&str> = line.split('\t').collect();
+    for row in &rows {
+        let fields: Vec<&str> = row.splitn(PANE_FIELDS, '\t').collect();
 
         let [
             pane,
@@ -498,12 +555,12 @@ fn parse_panes(output: &str) -> Vec<PaneRecord> {
             tab_id,
             tab_label,
             label,
-            cwd,
             agent,
             command,
+            cwd,
         ] = fields[..]
         else {
-            tracing::warn!("skipping malformed pane line: {line:?}");
+            tracing::warn!("skipping malformed pane line: {row:?}");
             continue;
         };
         let agent = non_empty(agent)
@@ -641,7 +698,7 @@ mod tests {
 
         #[test]
         fn should_fill_record_when_line_complete() {
-            let line = "%1\t$0\tws\t@1\ttabby\timpl-1\t/tmp\tclaude\tnode";
+            let line = "%1\t$0\tws\t@1\ttabby\timpl-1\tclaude\tnode\t/tmp";
 
             let records = parse_panes(line);
 
@@ -659,21 +716,58 @@ mod tests {
 
         #[test]
         fn should_detect_agent_from_command_when_option_empty() {
-            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t/tmp\t\tcodex");
+            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t\tcodex\t/tmp");
 
             assert_eq!(records[0].agent.as_deref(), Some("codex"));
         }
 
         #[test]
         fn should_leave_agent_null_when_command_unknown() {
-            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t/tmp\t\tbash");
+            let records = parse_panes("%0\t$0\tws\t@0\tw\t\t\tbash\t/tmp");
 
             assert_eq!(records[0].agent, None);
+        }
+
+        #[rstest]
+        #[case::tab("/tmp/a\tb")]
+        #[case::newline("/tmp/a\nb")]
+        #[case::trailing_newline("/tmp/a\n")]
+        fn should_keep_cwd_whole_when_it_holds_delimiters(#[case] cwd: &str) {
+            let output = format!(
+                "%0\t$0\tws\t@0\tw\t\t\tbash\t{cwd}\n\
+                 %1\t$0\tws\t@0\tw\tl\t\tbash\t/tmp\n"
+            );
+
+            let records = parse_panes(&output);
+
+            assert_eq!(
+                records
+                    .iter()
+                    .map(|r| (r.handle.0.as_str(), r.cwd.as_deref()))
+                    .collect::<Vec<_>>(),
+                vec![("%0", Some(cwd)), ("%1", Some("/tmp"))]
+            );
         }
 
         #[test]
         fn should_skip_line_when_fields_missing() {
             assert!(parse_panes("%0\t$0\tws\n").is_empty());
+        }
+    }
+
+    mod check_text {
+        use super::*;
+
+        #[rstest]
+        #[case::tab("a\tb", false)]
+        #[case::newline("a\nb", false)]
+        #[case::escape("a\u{1b}b", false)]
+        #[case::plain("impl-1 é", true)]
+        fn should_reject_only_control_characters(
+            #[case] text: &str,
+            #[case] ok: bool,
+        ) {
+            assert_eq!(check_text("label", text).is_ok(), ok);
         }
     }
 
