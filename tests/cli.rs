@@ -1,7 +1,10 @@
 //! CLI tests: exit codes, error records, output shape, help snapshots.
 //! They run the built binary and never reach a real harness.
 
-use std::process::{Command, Output};
+use std::{
+    process::{Command, Output},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use rstest::rstest;
 
@@ -140,12 +143,28 @@ fn should_ignore_patterns_file_when_harness_is_herdr() {
 }
 
 #[test]
-fn should_exit_5_when_tmux_stub_reads() {
-    let output = md(&["--harness", "tmux", "pane", "read", "%1"]);
+fn should_exit_3_when_tmux_session_missing() {
+    // Unique per run, so no pre-existing server can own the socket.
+    let session = format!(
+        "md-test-absent-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let output = md(&[
+        "--harness",
+        "tmux",
+        "--session",
+        &session,
+        "pane",
+        "read",
+        "%1",
+    ]);
 
     assert_eq!(
         (output.status.code(), error_type(&output).as_str()),
-        (Some(5), "unsupported")
+        (Some(3), "harness_unavailable")
     );
 }
 
