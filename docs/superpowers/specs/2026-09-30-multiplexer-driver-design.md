@@ -425,6 +425,12 @@ Every call is `tmux [-L <session>] <subcommand> …`.
   already does for window names. Ceiling: an `@md-label` with control
   characters written by another tool can garble that one record; the
   pane stays listed.
+  Second ceiling (found by CI 2026-09-30): older tmux (the Ubuntu apt
+  build, 3.4 or near) prints a carriage return in `pane_current_path` as
+  the two characters `\r`; tmux 3.7c prints the raw byte. The driver does
+  not unescape (a real `\` followed by `r` would be ambiguous), so on
+  older tmux a cwd containing a carriage return comes back escaped. Tests
+  for that case run only on tmux 3.7 or later.
 - **pane spawn:** new window (tab) in the workspace:
   `new-window -d -t <ws> -n <name> -c <cwd> -P -F '#{pane_id}'
   [<shell-joined command>]`. The workspace defaults to the caller's
