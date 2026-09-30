@@ -14,12 +14,27 @@ function Invoke-Md {
     return $out
 }
 
+# Runs multiplexer-driver with stderr discarded and returns its exit code.
+# Windows PowerShell 5.1 turns redirected native stderr into a terminating
+# error under 'Stop', so the preference is relaxed around the call.
+function Invoke-MdQuiet {
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & multiplexer-driver --harness herdr @args 2>$null | Out-Null
+        return $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $saved
+    }
+}
+
 try {
     $ws = (Invoke-Md workspace create --label md-winsmoke |
         ConvertFrom-Json).workspace_id
 
     $handle = (Invoke-Md pane spawn --name md-winsmoke-1 --workspace $ws `
-        -- powershell -NoProfile -Command "Write-Output ('win-' + (6*7))" |
+        '--' powershell -NoProfile -Command "Write-Output ('win-' + (6*7))" |
         ConvertFrom-Json).handle
 
     $found = $false
@@ -42,10 +57,9 @@ try {
         throw "pane label is '$($pane.label)', expected 'md-winsmoke-1'"
     }
 
-    & multiplexer-driver --harness herdr pane read "${ws}:p999" 2>$null |
-        Out-Null
-    if ($LASTEXITCODE -ne 4) {
-        throw "pane read of a missing pane exited $LASTEXITCODE, expected 4"
+    $code = Invoke-MdQuiet pane read "${ws}:p999"
+    if ($code -ne 4) {
+        throw "pane read of a missing pane exited $code, expected 4"
     }
 
     Write-Output 'PASS'
@@ -56,8 +70,7 @@ catch {
 }
 finally {
     if ($ws) {
-        & multiplexer-driver --harness herdr workspace close $ws 2>$null |
-            Out-Null
+        [void](Invoke-MdQuiet workspace close $ws)
     }
 }
 if ($failed) { exit 1 }
