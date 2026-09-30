@@ -11,6 +11,8 @@ use std::{
     time::Duration,
 };
 
+use rstest::rstest;
+
 use multiplexer_driver::{
     driver::{Driver, SpawnRequest, SplitRequest},
     model::{Direction, Handle, Status},
@@ -291,4 +293,117 @@ fn should_fail_unexpected_when_raw_command_fails() {
         .unwrap_err();
 
     assert_eq!(err.kind(), "unexpected");
+}
+
+#[test]
+fn should_return_only_requested_lines_when_read() {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    // No shell prompt: the last output line is the last number.
+    let command = cmd(&[
+        "bash",
+        "-c",
+        "for i in $(seq 1 20); do echo num-$i; done; sleep 30",
+    ]);
+    let pane = driver
+        .pane_spawn(&SpawnRequest {
+            name: "numbers",
+            workspace: Some(&ws),
+            cwd: Path::new("/tmp"),
+            command: &command,
+        })
+        .unwrap();
+
+    assert!(eventually(|| {
+        driver
+            .pane_read(&pane, 3, false)
+            .is_ok_and(|out| out.ends_with("num-20"))
+    }));
+
+    assert_eq!(
+        driver.pane_read(&pane, 3, false).unwrap(),
+        "num-18\nnum-19\nnum-20"
+    );
+}
+
+#[rstest]
+#[case::lone(";")]
+#[case::word("echo literal;")]
+#[case::backslash(r"echo a\;")]
+fn should_deliver_text_literally_when_prompt_ends_with_semicolon(
+    #[case] text: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let ws =
+        server.tmux(&["display-message", "-p", "-t", "ws", "#{session_id}"]);
+    let command = cmd(&["cat"]);
+    let pane = driver
+        .pane_spawn(&SpawnRequest {
+            name: "cat",
+            workspace: Some(&ws),
+            cwd: Path::new("/tmp"),
+            command: &command,
+        })
+        .unwrap();
+
+    driver.pane_prompt(&pane, text).unwrap();
+
+    assert!(
+        eventually(|| {
+            driver
+                .pane_read(&pane, 10, false)
+                .is_ok_and(|out| out.lines().any(|l| l == text))
+        }),
+        "no line equal to {text:?}"
+    );
+}
+
+#[rstest]
+#[case::lone(";")]
+#[case::word("semi;")]
+#[case::backslash(r"a\;")]
+fn should_store_label_literally_when_renamed_with_semicolon(
+    #[case] label: &str,
+) {
+    let server = server!();
+    let driver = server.driver();
+    let pane = first_pane(&server);
+
+    driver.pane_rename(&pane, label).unwrap();
+
+    assert_eq!(
+        server.tmux(&["display-message", "-p", "-t", &pane.0, "#{@md-label}"]),
+        label
+    );
+}
+
+#[test]
+fn should_fail_harness_unavailable_when_raw_server_gone() {
+    let server = server!();
+
+    server.tmux(&["kill-server"]);
+    let err = server.driver().raw(&cmd(&["list-sessions"])).unwrap_err();
+
+    assert_eq!(err.kind(), "harness_unavailable");
+}
+
+#[test]
+fn should_exit_3_when_cli_raw_server_gone() {
+    let server = server!();
+
+    server.tmux(&["kill-server"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_multiplexer-driver"))
+        .args(["--harness", "tmux", "--session", &server.name])
+        .args(["raw", "--", "list-sessions"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let last = stderr.lines().last().unwrap_or_default();
+    let record: serde_json::Value = serde_json::from_str(last).unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(record["error"]["type"], "harness_unavailable");
 }

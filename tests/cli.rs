@@ -1,7 +1,10 @@
 //! CLI tests: exit codes, error records, output shape, help snapshots.
 //! They run the built binary and never reach a real harness.
 
-use std::process::{Command, Output};
+use std::{
+    process::{Command, Output},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use rstest::rstest;
 
@@ -141,11 +144,19 @@ fn should_ignore_patterns_file_when_harness_is_herdr() {
 
 #[test]
 fn should_exit_3_when_tmux_session_missing() {
+    // Unique per run, so no pre-existing server can own the socket.
+    let session = format!(
+        "md-test-absent-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
     let output = md(&[
         "--harness",
         "tmux",
         "--session",
-        "md-test-absent-cli",
+        &session,
         "pane",
         "read",
         "%1",

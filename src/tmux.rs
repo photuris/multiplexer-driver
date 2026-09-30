@@ -144,7 +144,9 @@ impl Tmux {
         key: &str,
         value: &str,
     ) -> Result<()> {
-        self.run(&["set-option", "-p", "-t", pane, key, value])
+        let value = escape_semicolon(value);
+
+        self.run(&["set-option", "-p", "-t", pane, key, &value])
             .map(|_| ())
     }
 }
@@ -161,13 +163,14 @@ impl Driver for Tmux {
         };
         let cwd = request.cwd.to_string_lossy();
         let joined = shell_join(request.command);
+        let name = escape_semicolon(request.name);
         let mut args = vec![
             "new-window",
             "-d",
             "-t",
             &workspace,
             "-n",
-            request.name,
+            &name,
             "-c",
             &cwd,
             "-P",
@@ -231,12 +234,20 @@ impl Driver for Tmux {
             args.extend(["-e", "-J"]);
         }
 
-        Ok(trim_trailing_blank_lines(&self.run(&args)?))
+        // `-S -<n>` adds n history lines to the whole visible pane, so
+        // cut back to the last `lines`.
+        let trimmed = trim_trailing_blank_lines(&self.run(&args)?);
+        let all: Vec<&str> = trimmed.split('\n').collect();
+        let keep = all.len().saturating_sub(lines as usize);
+
+        Ok(all[keep..].join("\n"))
     }
 
     fn pane_prompt(&self, target: &Handle, text: &str) -> Result<()> {
         // `--` keeps text that starts with `-` from parsing as a flag.
-        self.run(&["send-keys", "-t", &target.0, "-l", "--", text])?;
+        let text = escape_semicolon(text);
+
+        self.run(&["send-keys", "-t", &target.0, "-l", "--", &text])?;
         self.run(&["send-keys", "-t", &target.0, "Enter"])?;
 
         Ok(())
@@ -244,7 +255,9 @@ impl Driver for Tmux {
 
     fn pane_rename(&self, target: &Handle, label: &str) -> Result<()> {
         self.set_pane_option(&target.0, "@md-label", label)?;
-        self.run(&["select-pane", "-t", &target.0, "-T", label])?;
+        let title = escape_semicolon(label);
+
+        self.run(&["select-pane", "-t", &target.0, "-T", &title])?;
 
         Ok(())
     }
@@ -285,10 +298,33 @@ impl Driver for Tmux {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
-            return Err(Error::Unexpected(stderr.trim().to_string()));
+            // A missing server stays `harness_unavailable` (§7.4). So
+            // does a dead one whose socket file remains: tmux reports
+            // that as "server exited unexpectedly" (`run` retries it,
+            // `raw` does not). Any other failure is `unexpected`.
+            let message = stderr.trim();
+
+            return Err(match classify_error(message) {
+                e @ Error::HarnessUnavailable(_) => e,
+                _ if message.contains("server exited unexpectedly") => {
+                    Error::HarnessUnavailable(message.to_string())
+                }
+                _ => Error::Unexpected(message.to_string()),
+            });
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+}
+
+/// Protects a trailing `;` in a data argument. tmux reads an argv
+/// element ending in `;` as a command separator, even after `--`, and
+/// strips one backslash before it; the extra backslash keeps the text
+/// literal.
+fn escape_semicolon(text: &str) -> String {
+    match text.strip_suffix(';') {
+        Some(head) => format!("{head}\\;"),
+        None => text.to_string(),
     }
 }
 
@@ -346,6 +382,23 @@ mod tests {
             #[case] kind: &str,
         ) {
             assert_eq!(classify_error(stderr).kind(), kind);
+        }
+    }
+
+    mod escape_semicolon {
+        use super::*;
+
+        #[rstest]
+        #[case::plain("echo hi", "echo hi")]
+        #[case::trailing(";", "\\;")]
+        #[case::word("semi;", "semi\\;")]
+        #[case::backslash("a\\;", "a\\\\;")]
+        #[case::inner("a;b", "a;b")]
+        fn should_escape_only_a_trailing_semicolon(
+            #[case] text: &str,
+            #[case] escaped: &str,
+        ) {
+            assert_eq!(escape_semicolon(text), escaped);
         }
     }
 
