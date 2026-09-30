@@ -725,7 +725,8 @@ unaffected by quoting.
   workspace list` until it succeeds (5 s cap), not by checking a socket
   file.
 - A new workflow, `.github/workflows/ci.yml`, runs on every push to
-  `main` or `windows-support` and every pull request, on `ubuntu-latest`, `macos-latest`,
+  `main` and every pull request (the temporary `windows-support` trigger
+  was removed after the merge), on `ubuntu-latest`, `macos-latest`,
   and `windows-latest`: `cargo fmt --check` (Ubuntu only), then clippy
   with `-D warnings` and `cargo test --locked` on all three. Ubuntu and
   macOS install tmux so its integration tests run.
