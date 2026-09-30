@@ -192,3 +192,44 @@ fn should_match_snapshot_when_help_shown(
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+/// With a fake `notify-send` as the only program on PATH, hyphen-led
+/// title and message must arrive as literal operands after `--`.
+#[cfg(target_os = "linux")]
+#[test]
+fn should_pass_literal_operands_when_notify_send_text_starts_with_hyphen() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let dir = std::env::temp_dir()
+        .join(format!("md-fake-notify-{}", std::process::id()));
+    let log = dir.join("args.log");
+    let script = dir.join("notify-send");
+
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nfor a; do printf '%s\\n' \"$a\"; done > '{}'\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_multiplexer-driver"))
+        .args(["notify", "--title=--help", "--message=-x"])
+        .env("PATH", &dir)
+        .env_remove("HERDR_ENV")
+        .output()
+        .unwrap_or_else(|e| panic!("running the binary: {e}"));
+    let logged = fs::read_to_string(&log).unwrap_or_default();
+
+    let _ = fs::remove_dir_all(&dir); // best effort cleanup
+
+    assert_eq!(
+        (output.status.code(), logged.as_str()),
+        (Some(0), "--\n--help\n-x\n"),
+        "stderr was {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

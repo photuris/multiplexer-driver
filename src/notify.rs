@@ -103,13 +103,13 @@ fn via_notify_send(
         return Ok(None);
     }
 
-    Ok(
-        run_tool("notify-send", &[title, message])?.map(|_| NotifyResult {
+    Ok(run_tool("notify-send", &["--", title, message])?.map(|_| {
+        NotifyResult {
             sent: true,
             method: "notify-send",
             reason: None,
-        }),
-    )
+        }
+    }))
 }
 
 /// Uses `osascript` on macOS when it is on PATH.
