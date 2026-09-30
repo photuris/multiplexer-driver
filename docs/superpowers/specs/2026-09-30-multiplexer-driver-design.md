@@ -670,7 +670,8 @@ child environment. It no longer computes a socket path or checks for a
 socket file. Verified on Linux (Herdr 0.8.2): both `herdr --session
 <name> <subcommand>` and `HERDR_SESSION=<name>` route to that session.
 A session with no running server fails with error code
-`server_not_running`, which maps to `harness_unavailable` (exit 3). It
+`server_not_running`, which maps to `harness_unavailable` (exit 3), for
+`raw` too (an exception to the raw rule in 5.2, like the missing binary). It
 does not create a session. Without `--session`, the ambient environment
 selects the server, as before.
 
@@ -686,11 +687,22 @@ decision; a pane running `cmd.exe` will not parse it):
   each embedded single-quote character doubled. PowerShell also treats
   U+2018, U+2019, U+201A, and U+201B as single quotes, so each of those
   is doubled as well. The empty string becomes `''`.
-- If the first argument (the command name) was quoted, the line starts
-  with the call operator and a space: `& 'my tool' arg`. A quoted first
-  token is a string expression in PowerShell, not a command.
+- The line always starts with the call operator and a space, then the
+  command name quoted by the same rule: `& claude --model opus`,
+  `& 'my tool' arg`. Without it, a quoted first token is a string and
+  names like `123` or `if` parse as a number or a keyword.
+- Windows PowerShell 5.1 (`powershell.exe`) uses legacy native argument
+  passing: it drops empty arguments, mangles embedded double quotes, and
+  mishandles a trailing backslash. PowerShell 7.3+ fixed this. So that
+  one command line works in both, `powershell_join` returns
+  `Err(Error::Usage)` for any argument that is empty, contains `"`, or
+  ends with `\`. On Windows `pane spawn`/`pane split` build the command
+  line before they create the pane, so a rejected command creates
+  nothing. Verified on Windows CI by an argv round trip under both
+  `powershell` and `pwsh` (section 13.3).
 
-Both functions are `pub` in `text.rs` and are unit-tested on every
+`powershell_join` returns `Result<String>`. Both functions are `pub` in
+`text.rs` and are unit-tested on every
 platform. `#[cfg(windows)]` selects which one `pane run` uses. Known
 agent kinds go through `agent start … -- <args>`, which is argv, and are
 unaffected by quoting.
@@ -707,10 +719,17 @@ unaffected by quoting.
   workspace list` until it succeeds (5 s cap), not by checking a socket
   file.
 - A new workflow, `.github/workflows/ci.yml`, runs on every push to
-  `main` and every pull request, on `ubuntu-latest`, `macos-latest`,
+  `main` or `windows-support` and every pull request, on `ubuntu-latest`, `macos-latest`,
   and `windows-latest`: `cargo fmt --check` (Ubuntu only), then clippy
   with `-D warnings` and `cargo test --locked` on all three. Ubuntu and
   macOS install tmux so its integration tests run.
+- A `#[cfg(windows)]` test in `tests/cli.rs` round-trips arguments
+  through a real PowerShell: for each of `a b`, `$HOME`, `it's`,
+  `‘x’`, `x&y`, it runs `<shell> -NoProfile -Command <line>`
+  where `<line>` is `powershell_join` of the built binary plus `agent
+  resume-args --kind claude --session-ref <arg>`, for `<shell>` in
+  `powershell` and `pwsh` (skip `pwsh` if absent), and asserts that the
+  printed `argv[2]` equals the argument exactly.
 - Live Windows behavior is verified by the user with an
   overseer-owned PowerShell smoke script,
   `docs/windows-smoke.ps1`.
