@@ -416,6 +416,14 @@ Every call is `tmux [-L <session>] <subcommand> …`.
   `agent_session` is `null` with `session_confidence` `none`. `status`
   is `unknown` with `status_confidence` `none` (listing does not read
   pane text). "no server running" means an empty list.
+  Field order puts `#{pane_current_path}` last. tmux cannot escape tabs
+  or newlines in formats (verified), so the parser folds extra fields
+  back into `cwd` and treats a line without a pane-ID row prefix as a
+  continuation of the previous `cwd`. The driver rejects control
+  characters in every label and name it writes (`usage`), as tmux
+  already does for window names. Ceiling: an `@md-label` with control
+  characters written by another tool can garble that one record; the
+  pane stays listed.
 - **pane spawn:** new window (tab) in the workspace:
   `new-window -d -t <ws> -n <name> -c <cwd> -P -F '#{pane_id}'
   [<shell-joined command>]`. The workspace defaults to the caller's
