@@ -219,7 +219,9 @@ fn should_match_snapshot_when_help_shown(
 
     insta::assert_snapshot!(
         format!("help_{name}"),
+        // Windows names the binary `multiplexer-driver.exe` in usage.
         String::from_utf8_lossy(&output.stdout)
+            .replace("multiplexer-driver.exe", "multiplexer-driver")
     );
 }
 

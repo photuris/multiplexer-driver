@@ -775,7 +775,8 @@ fn should_list_exact_cwd_when_directory_name_holds_delimiter(
             command: &command,
         })
         .unwrap();
-    let want = dir.to_string_lossy().into_owned();
+    // macOS reports the resolved path (/private/var/…) for a /var dir.
+    let want = dir.canonicalize().unwrap().to_string_lossy().into_owned();
     let cwd_of = |panes: Vec<multiplexer_driver::model::PaneRecord>| {
         panes
             .into_iter()
