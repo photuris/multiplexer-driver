@@ -4,6 +4,7 @@
 use std::{
     io::{self, Read},
     process::{Command, Output, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -29,8 +30,8 @@ pub fn output_within(
         .spawn()?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let out_reader = thread::spawn(move || read_all(stdout));
-    let err_reader = thread::spawn(move || read_all(stderr));
+    let out_reader = spawn_reader(stdout);
+    let err_reader = spawn_reader(stderr);
     let deadline = Instant::now() + limit;
 
     let status = loop {
@@ -53,9 +54,43 @@ pub fn output_within(
 
     Ok(Output {
         status,
-        stdout: out_reader.join().unwrap_or_default(),
-        stderr: err_reader.join().unwrap_or_default(),
+        stdout: collect(&out_reader, deadline, limit)?,
+        stderr: collect(&err_reader, deadline, limit)?,
     })
+}
+
+/// Reads `pipe` on its own thread and sends what it read on the returned
+/// channel. The thread is detached: a descendant that keeps the pipe
+/// open can only delay that thread, never the caller.
+fn spawn_reader(
+    pipe: Option<impl Read + Send + 'static>,
+) -> mpsc::Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        let _ = sender.send(read_all(pipe)); // receiver gone: timed out
+    });
+
+    receiver
+}
+
+/// Waits for a reader's bytes until `deadline`. A reader thread that died
+/// without sending yields no bytes.
+fn collect(
+    receiver: &mpsc::Receiver<Vec<u8>>,
+    deadline: Instant,
+    limit: Duration,
+) -> io::Result<Vec<u8>> {
+    match receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    {
+        Ok(bytes) => Ok(bytes),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Ok(Vec::new()),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("output still open after {limit:?}"),
+        )),
+    }
 }
 
 /// Reads a child pipe to its end; a missing pipe or read error gives
@@ -100,6 +135,25 @@ mod tests {
             assert!(
                 err.kind() == io::ErrorKind::TimedOut
                     && started.elapsed() < Duration::from_secs(2),
+                "got {err:?} after {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[rstest::rstest]
+        #[case::stdout("sleep 2 & exit 0")]
+        #[case::stderr("sleep 2 >/dev/null & exit 0")]
+        fn should_time_out_when_descendant_holds_pipe(#[case] script: &str) {
+            let mut command = Command::new("sh");
+            command.args(["-c", script]);
+            let started = Instant::now();
+
+            let err = output_within(&mut command, Duration::from_millis(100))
+                .unwrap_err();
+
+            assert!(
+                err.kind() == io::ErrorKind::TimedOut
+                    && started.elapsed() < Duration::from_secs(1),
                 "got {err:?} after {:?}",
                 started.elapsed()
             );
