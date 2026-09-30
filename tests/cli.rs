@@ -263,3 +263,32 @@ fn should_pass_literal_operands_when_notify_send_text_starts_with_hyphen() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// A reader that closes stdout before the binary writes is not an error:
+/// the tool is meant to be cut with `head`.
+#[test]
+fn should_exit_quietly_when_stdout_closes() {
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_multiplexer-driver"))
+        .args(["agent", "resume-args", "--kind", "claude", "--session-ref"])
+        .arg("x")
+        .env_remove("RUST_LOG")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawning the binary: {e}"));
+
+    drop(child.stdout.take());
+
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|e| panic!("waiting for the binary: {e}"));
+
+    assert_eq!(
+        (output.status.code(), output.stderr.as_slice()),
+        (Some(0), b"".as_slice()),
+        "stderr was {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
