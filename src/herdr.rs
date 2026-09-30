@@ -2,7 +2,7 @@
 
 use std::{
     env,
-    io::ErrorKind,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -35,10 +35,10 @@ impl Herdr {
     /// output. With a session, every `HERDR_*` variable is removed
     /// from the child and `HERDR_SOCKET_PATH` is set to the session's
     /// socket, so the caller's own session never leaks in (§4.4).
-    fn output(&self, args: &[&str]) -> Result<Output> {
+    fn output<S: AsRef<str>>(&self, args: &[S]) -> Result<Output> {
         let mut command = Command::new("herdr");
 
-        command.args(args);
+        command.args(args.iter().map(AsRef::as_ref));
 
         if let Some(name) = &self.session {
             let socket = socket_path(name)?;
@@ -59,18 +59,12 @@ impl Herdr {
             command.env("HERDR_SOCKET_PATH", socket);
         }
 
-        output_within(&mut command, CEILING).map_err(|e| {
-            if e.kind() == ErrorKind::TimedOut {
-                Error::Unexpected(format!("running herdr: {e}"))
-            } else {
-                Error::HarnessUnavailable(format!("running herdr: {e}"))
-            }
-        })
+        output_within(&mut command, CEILING).map_err(|e| spawn_error(&e))
     }
 
     /// Runs `herdr args…` and returns stdout; a failing exit is
     /// classified from its stderr envelope.
-    fn run(&self, args: &[&str]) -> Result<String> {
+    fn run<S: AsRef<str>>(&self, args: &[S]) -> Result<String> {
         let output = self.output(args)?;
 
         if !output.status.success() {
@@ -83,7 +77,10 @@ impl Herdr {
     }
 
     /// Runs `herdr args…` and parses its JSON stdout as `T`.
-    fn run_json<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T> {
+    fn run_json<T: DeserializeOwned, S: AsRef<str>>(
+        &self,
+        args: &[S],
+    ) -> Result<T> {
         let stdout = self.run(args)?;
 
         serde_json::from_str(&stdout).map_err(|e| {
@@ -123,15 +120,7 @@ impl Herdr {
         };
 
         if is_known_kind(first) {
-            let mut args =
-                vec!["agent", "start", name, "--kind", first, "--pane", pane];
-
-            if command.len() > 1 {
-                args.push("--");
-                args.extend(command[1..].iter().map(String::as_str));
-            }
-
-            self.run(&args)?;
+            self.run(&agent_start_args(name, first, pane, &command[1..]))?;
 
             return Ok(());
         }
@@ -161,18 +150,11 @@ impl Driver for Herdr {
                 )
             })?,
         };
-        let cwd = request.cwd.to_string_lossy();
-        let created: TabCreated = self.run_json(&[
-            "tab",
-            "create",
-            "--workspace",
+        let created: TabCreated = self.run_json(&tab_create_args(
             &workspace,
-            "--cwd",
-            &cwd,
-            "--label",
+            request.cwd,
             request.name,
-            "--no-focus",
-        ])?;
+        ))?;
 
         self.start_in_pane(
             &created.result.root_pane.pane_id,
@@ -186,22 +168,11 @@ impl Driver for Herdr {
             return Err(Error::Usage("a command is required on herdr".into()));
         }
 
-        let direction = match request.direction {
-            Direction::Right => "right",
-            Direction::Down => "down",
-        };
-        let cwd = request.cwd.to_string_lossy();
-        let split: PaneGet = self.run_json(&[
-            "pane",
-            "split",
-            "--pane",
+        let split: PaneGet = self.run_json(&split_args(
             &request.target.0,
-            "--direction",
-            direction,
-            "--cwd",
-            &cwd,
-            "--no-focus",
-        ])?;
+            request.direction,
+            request.cwd,
+        ))?;
 
         self.start_in_pane(
             &split.result.pane.pane_id,
@@ -216,19 +187,9 @@ impl Driver for Herdr {
         lines: u32,
         ansi: bool,
     ) -> Result<String> {
-        let lines = lines.to_string();
-        let mut args = vec![
-            "pane", "read", &target.0,
-            // Required: on herdr 0.8.2, --lines with the default source
-            // silently returns nothing.
-            "--source", "visible", "--lines", &lines,
-        ];
+        let out = self.run(&read_args(&target.0, lines, ansi))?;
 
-        if ansi {
-            args.extend(["--format", "ansi"]);
-        }
-
-        Ok(trim_trailing_blank_lines(&self.run(&args)?))
+        Ok(trim_trailing_blank_lines(&out))
     }
 
     fn pane_prompt(&self, target: &Handle, text: &str) -> Result<()> {
@@ -278,6 +239,86 @@ impl Driver for Herdr {
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
+}
+
+/// Maps a subprocess failure to an [`Error`]: a missing binary, a
+/// call past the ceiling, and any other spawn failure are all
+/// [`Error::HarnessUnavailable`] (§4.2).
+fn spawn_error(e: &io::Error) -> Error {
+    match e.kind() {
+        ErrorKind::NotFound => {
+            Error::HarnessUnavailable("herdr is not installed".into())
+        }
+        ErrorKind::TimedOut => {
+            Error::HarnessUnavailable(format!("herdr timed out: {e}"))
+        }
+        _ => Error::HarnessUnavailable(format!("running herdr: {e}")),
+    }
+}
+
+/// Converts string slices to owned argument strings.
+fn owned(args: &[&str]) -> Vec<String> {
+    args.iter().map(|a| (*a).to_string()).collect()
+}
+
+/// Arguments for `tab create` in `workspace`.
+fn tab_create_args(workspace: &str, cwd: &Path, label: &str) -> Vec<String> {
+    let mut args = owned(&["tab", "create", "--workspace", workspace]);
+
+    args.extend(["--cwd".into(), cwd.to_string_lossy().into_owned()]);
+    args.extend(owned(&["--label", label, "--no-focus"]));
+
+    args
+}
+
+/// Arguments for `pane split` of `target`.
+fn split_args(target: &str, direction: Direction, cwd: &Path) -> Vec<String> {
+    let direction = match direction {
+        Direction::Right => "right",
+        Direction::Down => "down",
+    };
+    let mut args = owned(&["pane", "split", "--pane", target]);
+
+    args.extend(owned(&["--direction", direction, "--cwd"]));
+    args.extend([cwd.to_string_lossy().into_owned(), "--no-focus".into()]);
+
+    args
+}
+
+/// Arguments for `pane read` of the last `lines` visible lines.
+fn read_args(target: &str, lines: u32, ansi: bool) -> Vec<String> {
+    let mut args = owned(&["pane", "read", target]);
+
+    // Required: on herdr 0.8.2, --lines with the default source
+    // silently returns nothing.
+    args.extend(owned(&["--source", "visible", "--lines"]));
+    args.push(lines.to_string());
+
+    if ansi {
+        args.extend(owned(&["--format", "ansi"]));
+    }
+
+    args
+}
+
+/// Arguments for `agent start` of a known kind, forwarding `rest`
+/// after `--` when it is not empty.
+fn agent_start_args(
+    name: &str,
+    kind: &str,
+    pane: &str,
+    rest: &[String],
+) -> Vec<String> {
+    let mut args = owned(&["agent", "start", name, "--kind", kind]);
+
+    args.extend(owned(&["--pane", pane]));
+
+    if !rest.is_empty() {
+        args.push("--".into());
+        args.extend(rest.iter().cloned());
+    }
+
+    args
 }
 
 /// One pane object as Herdr prints it (only the fields we read).
@@ -439,6 +480,123 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 "pane_not_found: pane w1:p99 not found"
+            );
+        }
+    }
+
+    mod spawn_error {
+        use super::*;
+
+        #[rstest]
+        #[case::missing(ErrorKind::NotFound, "herdr is not installed")]
+        #[case::timeout(ErrorKind::TimedOut, "herdr timed out: ")]
+        #[case::other(ErrorKind::PermissionDenied, "running herdr: ")]
+        fn should_be_unavailable_when_spawn_fails(
+            #[case] kind: ErrorKind,
+            #[case] prefix: &str,
+        ) {
+            let err = spawn_error(&io::Error::new(kind, "x"));
+
+            assert_eq!(err.kind(), "harness_unavailable");
+            assert!(err.to_string().starts_with(prefix), "got {err}");
+        }
+    }
+
+    mod args {
+        use super::*;
+
+        /// Owned argument strings from literals.
+        fn v(items: &[&str]) -> Vec<String> {
+            owned(items)
+        }
+
+        #[test]
+        fn should_forward_args_after_separator_when_known_kind_has_rest() {
+            assert_eq!(
+                agent_start_args(
+                    "n",
+                    "claude",
+                    "w1:p2",
+                    &v(&["--model", "x"])
+                ),
+                v(&[
+                    "agent", "start", "n", "--kind", "claude", "--pane",
+                    "w1:p2", "--", "--model", "x"
+                ])
+            );
+        }
+
+        #[test]
+        fn should_omit_separator_when_known_kind_has_no_rest() {
+            assert_eq!(
+                agent_start_args("n", "claude", "w1:p2", &[]),
+                v(&[
+                    "agent", "start", "n", "--kind", "claude", "--pane",
+                    "w1:p2"
+                ])
+            );
+        }
+
+        #[rstest]
+        #[case::right(Direction::Right, "right")]
+        #[case::down(Direction::Down, "down")]
+        fn should_pass_direction_when_splitting(
+            #[case] direction: Direction,
+            #[case] word: &str,
+        ) {
+            assert_eq!(
+                split_args("w1:p1", direction, Path::new("/tmp")),
+                v(&[
+                    "pane",
+                    "split",
+                    "--pane",
+                    "w1:p1",
+                    "--direction",
+                    word,
+                    "--cwd",
+                    "/tmp",
+                    "--no-focus"
+                ])
+            );
+        }
+
+        #[test]
+        fn should_read_visible_source_when_plain() {
+            assert_eq!(
+                read_args("w1:p1", 20, false),
+                v(&[
+                    "pane", "read", "w1:p1", "--source", "visible", "--lines",
+                    "20"
+                ])
+            );
+        }
+
+        #[test]
+        fn should_add_ansi_format_when_ansi() {
+            assert_eq!(
+                read_args("w1:p1", 5, true),
+                v(&[
+                    "pane", "read", "w1:p1", "--source", "visible", "--lines",
+                    "5", "--format", "ansi"
+                ])
+            );
+        }
+
+        #[test]
+        fn should_label_tab_without_focus_when_creating() {
+            assert_eq!(
+                tab_create_args("w1", Path::new("/tmp"), "lbl"),
+                v(&[
+                    "tab",
+                    "create",
+                    "--workspace",
+                    "w1",
+                    "--cwd",
+                    "/tmp",
+                    "--label",
+                    "lbl",
+                    "--no-focus"
+                ])
             );
         }
     }

@@ -9,7 +9,8 @@
 #![expect(clippy::expect_used, reason = "test helpers panic on failure")]
 
 use std::{
-    env, io,
+    env, fs, io,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -24,17 +25,32 @@ use multiplexer_driver::{
 use serde_json::Value;
 
 /// A headless Herdr server for this test binary.
+#[derive(Debug)]
 struct Server {
-    /// Session name, always `md-test-<pid>`.
+    /// The `herdr` program to run.
+    program: String,
+    /// Session name, always `md-test-…`.
     name: String,
     /// Socket file of the session.
     socket: PathBuf,
     /// Server process.
     child: Child,
+    /// Whether this test created the session. Only an owned session is
+    /// ever stopped or deleted.
+    owned: bool,
     /// Workspace created for the scenarios.
     workspace: String,
     /// The workspace's root pane.
     root: Handle,
+}
+
+/// Why [`Server::start_with`] gave up.
+#[derive(Debug)]
+enum StartError {
+    /// The `herdr` program does not exist.
+    NotInstalled,
+    /// The session is taken or the server did not come up.
+    Failed(String),
 }
 
 /// Directory that holds Herdr's `sessions/` tree.
@@ -46,22 +62,17 @@ fn config_dir() -> PathBuf {
     }
 }
 
-/// A `herdr` command with every `HERDR_*` variable removed.
-fn clean_herdr() -> Command {
-    let mut command = Command::new("herdr");
+/// A `program` command with every `HERDR_*` variable removed.
+fn clean_herdr(program: &str) -> Command {
+    let mut command = Command::new(program);
 
-    clean_env(&mut command);
-
-    command
-}
-
-/// Removes every `HERDR_*` variable from `command`'s environment.
-fn clean_env(command: &mut Command) {
     for (key, _) in env::vars_os() {
         if key.to_string_lossy().starts_with("HERDR_") {
             command.env_remove(key);
         }
     }
+
+    command
 }
 
 impl Server {
@@ -69,38 +80,95 @@ impl Server {
     /// `herdr` is not installed; any other failure panics.
     fn start() -> Option<Self> {
         let name = format!("md-test-{}", std::process::id());
-        let socket = config_dir()
-            .join("herdr/sessions")
-            .join(&name)
-            .join("herdr.sock");
-        let mut command = clean_herdr();
 
-        command
-            .args(["--session", &name, "server"])
+        match Self::start_with("herdr", &config_dir(), &name) {
+            Ok(server) => Some(server),
+            Err(StartError::NotInstalled) => None,
+            Err(StartError::Failed(why)) => panic!("{why}"),
+        }
+    }
+
+    /// Starts `program --session name server` under the config
+    /// directory `config`. Refuses a session that already exists
+    /// before spawning anything, and gives up ownership when the
+    /// child exits early, so a session this test did not create is
+    /// never used, stopped, or deleted.
+    fn start_with(
+        program: &str,
+        config: &Path,
+        name: &str,
+    ) -> Result<Self, StartError> {
+        assert!(name.starts_with("md-test-"));
+
+        let session_dir = config.join("herdr/sessions").join(name);
+
+        if session_dir.exists() {
+            return Err(StartError::Failed(format!(
+                "session {name} already exists at {}; not touching it",
+                session_dir.display()
+            )));
+        }
+
+        let child = match clean_herdr(program)
+            .args(["--session", name, "server"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        let child = match command.spawn() {
+            .stderr(Stdio::null())
+            .spawn()
+        {
             Ok(child) => child,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
-            Err(e) => panic!("starting herdr server: {e}"),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(StartError::NotInstalled);
+            }
+            Err(e) => {
+                return Err(StartError::Failed(format!(
+                    "starting herdr server: {e}"
+                )));
+            }
         };
         let mut server = Self {
-            name,
-            socket,
+            program: program.to_string(),
+            name: name.to_string(),
+            socket: session_dir.join("herdr.sock"),
             child,
+            owned: true,
             workspace: String::new(),
             root: Handle(String::new()),
         };
+
+        server.wait_for_socket()?;
+        server.create_workspace();
+
+        Ok(server)
+    }
+
+    /// Waits up to 5 s for the socket, failing at once if the child
+    /// has exited (and then disowning the session).
+    fn wait_for_socket(&mut self) -> Result<(), StartError> {
         let deadline = Instant::now() + Duration::from_secs(5);
 
-        while !server.socket.exists() {
-            assert!(Instant::now() < deadline, "no socket after 5 s");
+        while !self.socket.exists() {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                self.owned = false;
+
+                return Err(StartError::Failed(format!(
+                    "herdr server exited during startup: {status}"
+                )));
+            }
+
+            if Instant::now() >= deadline {
+                return Err(StartError::Failed("no socket after 5 s".into()));
+            }
+
             thread::sleep(Duration::from_millis(50));
         }
 
-        let created: Value = serde_json::from_str(&server.herdr(&[
+        Ok(())
+    }
+
+    /// Creates the workspace the scenarios run in.
+    fn create_workspace(&mut self) {
+        let created: Value = serde_json::from_str(&self.herdr(&[
             "workspace",
             "create",
             "--label",
@@ -111,18 +179,16 @@ impl Server {
         ]))
         .expect("workspace create prints JSON");
 
-        server.workspace = created["result"]["workspace"]["workspace_id"]
+        self.workspace = created["result"]["workspace"]["workspace_id"]
             .as_str()
             .expect("workspace_id")
             .to_string();
-        server.root = Handle(
+        self.root = Handle(
             created["result"]["root_pane"]["pane_id"]
                 .as_str()
                 .expect("root pane_id")
                 .to_string(),
         );
-
-        Some(server)
     }
 
     /// A driver aimed at this server.
@@ -146,8 +212,9 @@ impl Server {
     /// Like [`Server::herdr`] but returns the raw output.
     fn herdr_output(&self, args: &[&str]) -> std::process::Output {
         assert!(self.name.starts_with("md-test-"));
+        assert!(self.owned, "refusing to command a session we do not own");
 
-        clean_herdr()
+        clean_herdr(&self.program)
             .env("HERDR_SOCKET_PATH", &self.socket)
             .args(args)
             .output()
@@ -158,6 +225,10 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         assert!(self.name.starts_with("md-test-"));
+
+        if !self.owned {
+            return;
+        }
 
         let _ = self.herdr_output(&["server", "stop"]); // best effort
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -172,10 +243,52 @@ impl Drop for Server {
 
         let _ = self.child.kill(); // no-op when already exited
         let _ = self.child.wait(); // reap
-        let _ = clean_herdr() // session may already be gone
+        let _ = clean_herdr(&self.program) // session may already be gone
             .args(["session", "delete", &self.name])
             .output();
     }
+}
+
+/// Startup must never command a session it did not create: a taken
+/// name is refused before anything runs, and a server that exits at
+/// startup is never stopped or deleted. A fake `herdr` logs every call.
+fn startup_never_touches_foreign_session() {
+    let name = format!("md-test-fake-{}", std::process::id());
+    let dir = env::temp_dir().join(&name);
+    let session = dir.join("herdr/sessions").join(&name);
+    let log = dir.join("calls.log");
+    let fake = dir.join("fake-herdr");
+
+    fs::create_dir_all(&session).expect("create fake config");
+    fs::write(session.join("herdr.sock"), "").expect("fake socket");
+    fs::write(
+        &fake,
+        format!("#!/bin/sh\necho \"$@\" >> {}\nexit 1\n", log.display()),
+    )
+    .expect("write fake herdr");
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))
+        .expect("chmod fake herdr");
+
+    let program = fake.to_string_lossy();
+    let taken = Server::start_with(&program, &dir, &name);
+
+    assert!(matches!(taken, Err(StartError::Failed(_))), "got {taken:?}");
+    assert!(!log.exists(), "a command ran against a taken session");
+
+    fs::remove_dir_all(&session).expect("free the session");
+
+    let exited = Server::start_with(&program, &dir, &name);
+
+    assert!(
+        matches!(exited, Err(StartError::Failed(_))),
+        "got {exited:?}"
+    );
+
+    let calls = fs::read_to_string(&log).expect("fake herdr was started");
+
+    assert_eq!(calls.trim(), format!("--session {name} server"));
+
+    fs::remove_dir_all(&dir).expect("remove fake config");
 }
 
 /// Announces a passed scenario.
@@ -342,19 +455,26 @@ fn should_pass_args_through_when_raw(server: &Server) {
     assert!(out.contains("\"tab_list\""), "got {out:?}");
 }
 
-/// The driver talks to the test session, not the caller's own.
+/// The driver talks to the test session, not the caller's own: the
+/// workspaces it lists are exactly the ones this run created, all
+/// labelled `md-test…`, which no ambient session would hold.
 fn should_route_only_to_test_session(server: &Server) {
-    let Ok(ambient) = env::var("HERDR_PANE_ID") else {
-        return;
-    };
     let out = server
         .driver()
-        .raw(&argv(&["pane", "list"]))
-        .expect("raw pane list");
+        .raw(&argv(&["workspace", "list"]))
+        .expect("raw workspace list");
+    let listed: Value = serde_json::from_str(&out).expect("workspace list");
+    let labels: Vec<&str> = listed["result"]["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .map(|w| w["label"].as_str().expect("label"))
+        .collect();
 
+    assert!(labels.contains(&"md-test"), "labels {labels:?}");
     assert!(
-        !out.contains(&ambient),
-        "ambient pane {ambient} leaked into {out}"
+        labels.iter().all(|l| l.starts_with("md-test")),
+        "foreign workspace in {labels:?}"
     );
 }
 
@@ -406,6 +526,9 @@ fn should_exit_4_when_cli_reads_missing_pane(server: &Server) {
 /// Runs every scenario, in order, against one throwaway server.
 #[test]
 fn herdr_driver_scenarios() {
+    startup_never_touches_foreign_session();
+    eprintln!("precheck ok: startup_never_touches_foreign_session");
+
     let Some(server) = Server::start() else {
         eprintln!("herdr not installed; skipping");
         return;
