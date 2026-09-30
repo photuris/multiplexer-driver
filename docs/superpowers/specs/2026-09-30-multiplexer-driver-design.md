@@ -46,12 +46,13 @@ The CLI contract is new. It does not stay compatible with
 - Follows the `rust-style`, `coding-principles`, and `cli-utilities`
   skills: `rustfmt.toml` with `max_width = 79`, the lint table and
   `clippy.toml` from `rust-style`, doc comments on every item, no
-  `unwrap`/`expect` outside tests, `thiserror` in the library, `anyhow`
-  only in `main.rs`, `tracing` for diagnostics on stderr.
+  `unwrap`/`expect` outside tests, `thiserror` for the one error enum,
+  `tracing` for diagnostics on stderr. No `anyhow`: every error is
+  already the typed enum that `main.rs` maps to an exit code.
 - Synchronous. No `tokio`. Subprocesses run through
   `std::process::Command`.
 - Dependencies: `clap` (derive, env), `serde`, `serde_json`, `regex`,
-  `thiserror`, `anyhow`, `tracing`, `tracing-subscriber` (env-filter).
+  `thiserror`, `tracing`, `tracing-subscriber` (env-filter).
   Dev: `rstest`, `insta`. Add nothing else without a reason in the
   commit message.
 - `Cargo.lock` is committed. CI and local checks use `--locked`.
@@ -72,6 +73,7 @@ src/
   herdr.rs    Herdr driver
   tmux.rs     tmux driver
   agents.rs   shared agent knowledge: Herdr kinds, resume-args table
+  patterns.rs status patterns file: load, compile, classify a tail
   notify.rs   notify (harness-independent)
   text.rs     trim trailing blank lines, POSIX shell quoting
 tests/
@@ -100,7 +102,7 @@ call within `rust-style`):
 - `pane_read(target, lines, ansi)`, `pane_prompt(target, text)`,
   `pane_rename(target, label)`, `pane_interrupt(target)`,
   `pane_kill(target)`
-- `pane_status(target)`, `pane_wait(target, until, timeout)`
+- `pane_status(target)`, `raw(args)`
 
 `notify` and `agent resume-args` do not go through the trait.
 
