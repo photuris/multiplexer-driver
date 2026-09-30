@@ -128,11 +128,15 @@ fn should_exit_2_when_sound_invalid() {
 fn should_ignore_patterns_file_when_harness_is_herdr() {
     // The absent session means no real server is ever reached. Exit 3
     // proves --patterns was ignored: loading the file would be exit 2.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let session = format!("md-test-absent-{}-{nanos}", std::process::id());
     let output = md(&[
         "--harness",
         "herdr",
         "--session",
-        "md-test-absent-cli",
+        &session,
         "pane",
         "status",
         "w1:p1",
