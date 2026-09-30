@@ -532,7 +532,8 @@ fn check_text(what: &str, text: &str) -> Result<()> {
 fn parse_panes(output: &str) -> Vec<PaneRecord> {
     let mut rows: Vec<String> = Vec::new();
 
-    for line in output.lines() {
+    // LF only: `lines()` would eat the `\r` of a cwd ending in one.
+    for line in output.split_terminator('\n') {
         match rows.last_mut() {
             Some(row) if !is_row_start(line) => {
                 row.push('\n');
@@ -732,6 +733,8 @@ mod tests {
         #[case::tab("/tmp/a\tb")]
         #[case::newline("/tmp/a\nb")]
         #[case::trailing_newline("/tmp/a\n")]
+        #[case::trailing_cr("/tmp/a\r")]
+        #[case::crlf("/tmp/a\r\nb")]
         fn should_keep_cwd_whole_when_it_holds_delimiters(#[case] cwd: &str) {
             let output = format!(
                 "%0\t$0\tws\t@0\tw\t\t\tbash\t{cwd}\n\

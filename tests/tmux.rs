@@ -749,6 +749,8 @@ fn should_reject_label_and_keep_stored_one_when_it_holds_control_char(
 #[rstest]
 #[case::tab("a\tb")]
 #[case::newline("a\nb")]
+#[case::trailing_cr("a\r")]
+#[case::crlf("a\r\nb")]
 fn should_list_exact_cwd_when_directory_name_holds_delimiter(
     #[case] dirname: &str,
 ) {
