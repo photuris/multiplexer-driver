@@ -1,0 +1,44 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Print the argv that resumes an agent conversation.
+
+Prints {"argv":[…]}. Known kinds: claude, codex, pi; any other kind exits 5. Needs no harness.
+
+Example: multiplexer-driver agent resume-args --kind claude --session-ref a6b4
+
+Usage: multiplexer-driver agent resume-args [OPTIONS] --kind <KIND> --session-ref <SESSION_REF>
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --kind <KIND>
+          Agent kind
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --session-ref <SESSION_REF>
+          Conversation ID or session file path
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

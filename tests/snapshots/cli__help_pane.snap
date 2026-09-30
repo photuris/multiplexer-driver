@@ -1,0 +1,47 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Panes and the agents in them
+
+Usage: multiplexer-driver pane [OPTIONS] <COMMAND>
+
+Commands:
+  list       List every pane, shells included
+  spawn      Open a new tab running a command
+  split      Split a pane and run a command in the new one
+  read       Read the last lines of a pane
+  prompt     Type text into a pane and press Enter
+  rename     Set a pane's label. The handle does not change
+  interrupt  Send Ctrl-C to a pane
+  kill       Close one pane, never its tab or workspace
+  status     Report the agent status of a pane
+  wait       Wait until a pane reaches a status
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

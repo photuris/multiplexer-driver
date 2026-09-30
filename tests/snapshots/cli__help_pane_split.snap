@@ -1,0 +1,60 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Split a pane and run a command in the new one.
+
+Prints {"handle":…,"started":true}. If the pane was created but the command did not start, prints started:false and exits 6.
+
+Example: multiplexer-driver --harness tmux pane split %1 --name logs --direction down -- tail -f app.log
+
+Usage: multiplexer-driver pane split [OPTIONS] --name <NAME> <HANDLE> [-- <COMMAND>...]
+
+Arguments:
+  <HANDLE>
+          Pane to split
+
+  [COMMAND]...
+          Command and arguments, after `--`
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --name <NAME>
+          Label for the new pane
+
+      --direction <DIRECTION>
+          Side of the new pane
+
+          Possible values:
+          - right: To the right
+          - down:  Below
+          
+          [default: right]
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --cwd <CWD>
+          Working directory; defaults to the current directory
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,45 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Report the agent status of a pane.
+
+Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs --patterns for a signal; Herdr reports natively and ignores it.
+
+Example: multiplexer-driver --harness tmux pane status %1 --patterns patterns.json
+
+Usage: multiplexer-driver pane status [OPTIONS] <HANDLE>
+
+Arguments:
+  <HANDLE>
+          Pane handle
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --patterns <PATTERNS>
+          JSON file of idle and blocked regexes (tmux only)
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

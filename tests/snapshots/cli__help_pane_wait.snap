@@ -1,0 +1,56 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Wait until a pane reaches a status.
+
+Polls every 500 ms and prints the StatusResult that matched. Exits 7 on timeout. tmux requires --patterns.
+
+Example: multiplexer-driver --harness tmux pane wait %1 --timeout 5m --until idle --patterns patterns.json
+
+Usage: multiplexer-driver pane wait [OPTIONS] --timeout <TIMEOUT> <HANDLE>
+
+Arguments:
+  <HANDLE>
+          Pane handle
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --timeout <TIMEOUT>
+          Longest time to wait: an integer with ms, s, or m
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --until <UNTIL>
+          Status to wait for (repeatable). Default: idle and blocked
+
+          Possible values:
+          - working: The agent is busy
+          - idle:    The agent waits for input
+          - blocked: The agent waits on a dialog or permission prompt
+
+      --patterns <PATTERNS>
+          JSON file of idle and blocked regexes (tmux only)
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

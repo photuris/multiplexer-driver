@@ -1,0 +1,42 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Run the harness CLI directly, with --session applied.
+
+Prints the harness stdout unchanged. A failing harness command is exit 1 with its stderr in the message.
+
+Example: multiplexer-driver --harness herdr raw -- tab list --workspace w1
+
+Usage: multiplexer-driver raw [OPTIONS] -- <ARGS>...
+
+Arguments:
+  <ARGS>...
+          Arguments passed to the harness binary
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

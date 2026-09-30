@@ -1,0 +1,49 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Drive tmux and Herdr workspaces, panes, and coding agents.
+
+stdout carries JSON (one object, or JSON Lines for lists). On failure the last stderr line is {"error":{"type":…,"message":…}}.
+
+Exit codes: 0 ok, 1 unexpected, 2 usage, 3 harness_unavailable, 4 not_found, 5 unsupported, 6 start_failed (handle still on stdout), 7 timeout, 130 interrupted.
+
+Usage: multiplexer-driver [OPTIONS] <COMMAND>
+
+Commands:
+  workspace  Workspaces (Herdr workspaces, tmux sessions)
+  pane       Panes and the agents in them
+  agent      Agent knowledge that needs no harness
+  notify     Show a desktop notification to the user
+  raw        Run the harness CLI directly, with --session applied
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

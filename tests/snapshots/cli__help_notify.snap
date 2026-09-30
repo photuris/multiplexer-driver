@@ -1,0 +1,51 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Show a desktop notification to the user.
+
+Prints {"sent":bool,"method":…,"reason":…}. Uses Herdr inside Herdr, else notify-send, else osascript; none available is not an error. Ignores --harness and --session.
+
+Example: multiplexer-driver notify --message "build done"
+
+Usage: multiplexer-driver notify [OPTIONS] --message <MESSAGE>
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --message <MESSAGE>
+          Notification body
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --title <TITLE>
+          Notification title
+          
+          [default: Overseer]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --sound <SOUND>
+          Sound: none, done, or request (Herdr only)
+          
+          [possible values: none, done, request]
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

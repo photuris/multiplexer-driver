@@ -1,0 +1,50 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Read the last lines of a pane.
+
+Prints {"handle":…,"output":…} with trailing blank lines trimmed. With --ansi, escape codes are kept. Note: the reset code that closes a dim run can land at the start of the next line.
+
+Example: multiplexer-driver --harness tmux pane read %1 --lines 50
+
+Usage: multiplexer-driver pane read [OPTIONS] <HANDLE>
+
+Arguments:
+  <HANDLE>
+          Pane handle
+
+Options:
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --lines <LINES>
+          Number of lines to read
+          
+          [default: 30]
+
+      --ansi
+          Keep ANSI escape codes
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,48 @@
+---
+source: tests/cli.rs
+expression: "String::from_utf8_lossy(&output.stdout)"
+---
+Set and clear workspace tags.
+
+Prints {"workspace_id":…,"tags":{…}} with the tags as they are now. Keys match [A-Za-z0-9_-]+. At least one pair or --clear is required.
+
+Example: multiplexer-driver --harness herdr workspace tag w1 project=x --clear old
+
+Usage: multiplexer-driver workspace tag [OPTIONS] <WORKSPACE> [PAIRS]...
+
+Arguments:
+  <WORKSPACE>
+          Workspace ID
+
+  [PAIRS]...
+          key=value pairs to set
+
+Options:
+      --clear <CLEAR>
+          Keys to remove (repeatable)
+
+      --harness <HARNESS>
+          Harness to drive. Required for workspace, pane, and raw
+
+          Possible values:
+          - tmux:  tmux
+          - herdr: Herdr
+          
+          [env: MULTIPLEXER_DRIVER_HARNESS=]
+
+      --session <SESSION>
+          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          
+          [env: MULTIPLEXER_DRIVER_SESSION=]
+
+      --pretty
+          Indent single-object output. Lists stay JSON Lines
+
+      --log-level <LOG_LEVEL>
+          Diagnostics level on stderr: debug, info, warn, or error
+          
+          [env: RUST_LOG=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')
