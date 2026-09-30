@@ -441,7 +441,17 @@ anywhere in the tail. An invalid regex or unreadable file is `usage`.
 `--patterns` on Herdr is accepted and ignored (Herdr status is
 native).
 
-### 7.4 Server-exit race
+### 7.4 No server
+
+A server that is not running shows up as `no server running on
+<socket>` or, on tmux 3.7 when the socket file is absent, `error
+connecting to <socket> (No such file or directory)`. Both mean an empty
+result for `workspace list` and `pane list`, and `harness_unavailable`
+for everything else. Other captured strings: `can't find pane: %99`,
+`can't find session: $99`, `can't find window: …` (all `not_found`),
+`duplicate session: ws` (`usage`).
+
+### 7.5 Server-exit race
 
 tmux exits its server when the last session closes. A command right
 after that can fail with "server exited unexpectedly". The run helper
