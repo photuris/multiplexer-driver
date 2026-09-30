@@ -6,11 +6,31 @@ panes, and the agents that run in them. Every result is JSON.
 
 ## Install
 
+Prebuilt binaries are fully static on Linux (musl) and exist for Linux
+and macOS on x86_64 and aarch64. Install the latest release with:
+
 ```bash
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/photuris/multiplexer-driver/releases/latest/download/multiplexer-driver-installer.sh | sh
 ```
 
-The build needs Rust 1.98 or later.
+Or download an archive from the
+[releases page](https://github.com/photuris/multiplexer-driver/releases/latest)
+and check it against `sha256.sum`. There is no Windows build.
+
+To build from source (Rust 1.98 or later):
+
+```bash
+cargo install --git https://github.com/photuris/multiplexer-driver --locked
+```
+
+## Releases
+
+Tag a version (`git tag v0.2.0 && git push origin v0.2.0`) after you
+bump `version` in `Cargo.toml`. The `dist` workflow in
+`.github/workflows/release.yml` builds every target and publishes the
+release. A pull request builds the same artifacts without publishing
+them.
 
 ## Quickstart
 
