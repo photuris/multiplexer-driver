@@ -21,6 +21,10 @@ On Windows, run this in PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/photuris/multiplexer-driver/releases/latest/download/multiplexer-driver-installer.ps1 | iex"
 ```
 
+The installer puts the binary in `~/.local/bin`
+(`%USERPROFILE%\.local\bin` on Windows) and adds it to your `PATH` if
+needed. Pass `--no-modify-path` to leave your shell profile alone.
+
 Or download an archive from the
 [releases page](https://github.com/photuris/multiplexer-driver/releases/latest)
 and check it against `sha256.sum`.
