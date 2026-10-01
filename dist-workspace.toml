@@ -17,6 +17,6 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux
 # release can be checked before it is tagged.
 pr-run-mode = "upload"
 # Path that installers should place binaries in
-install-path = "CARGO_HOME"
+install-path = "~/.local/bin"
 # Whether to install an updater program
 install-updater = false
