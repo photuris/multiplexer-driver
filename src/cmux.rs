@@ -825,6 +825,9 @@ struct SessionJson {
     agent: String,
     /// Conversation ID.
     session_id: String,
+    /// The session's workspace. Parsed for type checking; never read.
+    #[serde(rename = "workspace_id", default)]
+    _workspace_id: Option<String>,
     /// The surface the session ran in.
     #[serde(default)]
     surface_id: Option<String>,
@@ -957,7 +960,7 @@ mod tests {
             include_str!("../tests/fixtures/cmux/err_unknown_flag.txt"),
             "unexpected"
         )]
-        fn should_classify_by_stderr(
+        fn should_classify_as_expected_when_stderr_given(
             #[case] stderr: &str,
             #[case] kind: &str,
         ) {
@@ -1046,7 +1049,10 @@ mod tests {
         #[case("idle", Status::Idle)]
         #[case("needsInput", Status::Blocked)]
         #[case("unknown", Status::Unknown)]
-        fn should_map_lifecycle(#[case] raw: &str, #[case] expected: Status) {
+        fn should_map_status_when_lifecycle_given(
+            #[case] raw: &str,
+            #[case] expected: Status,
+        ) {
             assert_eq!(map_lifecycle(raw), expected);
         }
     }
@@ -1083,7 +1089,7 @@ mod tests {
         }
 
         #[test]
-        fn should_list_every_terminal_surface() {
+        fn should_list_every_terminal_surface_when_fixtures_parse() {
             assert_eq!(records().len(), 5);
         }
 
@@ -1223,7 +1229,7 @@ mod tests {
         }
 
         #[test]
-        fn should_parse_null_cwd_as_none() {
+        fn should_give_no_cwd_when_cwd_is_null() {
             let mut item = session("a", true, true, "idle", 1.0);
 
             item["cwd"] = Value::Null;
@@ -1342,7 +1348,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_return_caller_ids() {
+        fn should_return_caller_ids_when_caller_present() {
             let caller = parse_identify(include_str!(
                 "../tests/fixtures/cmux/identify.json"
             ))
@@ -1400,7 +1406,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_list_every_workspace_with_the_active_one_focused() {
+        fn should_mark_active_focused_when_listing_workspaces() {
             let records = workspace_records(&tree());
 
             assert_eq!(
@@ -1416,7 +1422,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_escape_backslash_and_quote() {
+        fn should_escape_text_when_it_has_backslash_and_quote() {
             let text = r#"say \n "hi" it's"#;
 
             assert_eq!(
@@ -1435,7 +1441,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_trim_trailing_blank_lines() {
+        fn should_trim_text_when_screen_has_trailing_blank_lines() {
             assert_eq!(
                 read_text(include_str!(
                     "../tests/fixtures/cmux/read_screen.json"
@@ -1450,7 +1456,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_change_directory_before_the_command() {
+        fn should_change_directory_first_when_cwd_given() {
             assert_eq!(
                 split_line(Path::new("/tmp"), &v(&["bash", "-c", "echo hi"])),
                 "cd /tmp && bash -c 'echo hi'"
@@ -1470,7 +1476,7 @@ mod tests {
             "new-workspace", "--name", "n", "--cwd", "/tmp", "--command",
             "claude -p x", "--focus", "false"
         ])]
-        fn should_build_new_workspace(
+        fn should_build_new_workspace_when_command_is_optional(
             #[case] command: Option<&str>,
             #[case] expected: &[&str],
         ) {
@@ -1483,7 +1489,7 @@ mod tests {
         #[rstest]
         #[case::right(Direction::Right, "right")]
         #[case::down(Direction::Down, "down")]
-        fn should_build_new_split(
+        fn should_build_new_split_when_direction_given(
             #[case] direction: Direction,
             #[case] word: &str,
         ) {
@@ -1494,7 +1500,7 @@ mod tests {
         }
 
         #[test]
-        fn should_build_identify() {
+        fn should_build_identify_when_refs_given() {
             assert_eq!(
                 identify_args("workspace:4", "surface:8"),
                 v(&[
@@ -1511,7 +1517,7 @@ mod tests {
         }
 
         #[test]
-        fn should_end_options_before_label_in_rename_tab() {
+        fn should_end_options_before_label_when_renaming_tab() {
             assert_eq!(
                 rename_tab_args("W", "S", "-x"),
                 v(&[
@@ -1527,7 +1533,7 @@ mod tests {
         }
 
         #[test]
-        fn should_build_close_surface() {
+        fn should_build_close_surface_when_ids_given() {
             assert_eq!(
                 close_surface_args("W", "S"),
                 v(&["close-surface", "--workspace", "W", "--surface", "S"])
@@ -1535,7 +1541,7 @@ mod tests {
         }
 
         #[test]
-        fn should_build_read_screen() {
+        fn should_build_read_screen_when_lines_given() {
             assert_eq!(
                 read_screen_args("S", 15),
                 v(&[
@@ -1552,7 +1558,7 @@ mod tests {
         #[rstest]
         #[case::all(None, &["sessions", "--json", "--all"])]
         #[case::one(Some("S"), &["sessions", "--json", "--surface", "S"])]
-        fn should_build_sessions(
+        fn should_build_sessions_when_surface_is_optional(
             #[case] surface: Option<&str>,
             #[case] expected: &[&str],
         ) {
