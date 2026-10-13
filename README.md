@@ -1,6 +1,6 @@
 # multiplexer-driver
 
-`multiplexer-driver` is a command-line tool that controls tmux and Herdr.
+`multiplexer-driver` is a command-line tool that controls tmux, Herdr, and cmux.
 It gives scripts and coding agents one set of commands for workspaces,
 panes, and the agents that run in them. Every result is JSON.
 
@@ -76,8 +76,8 @@ Global flags:
 
 | Flag | Environment variable | Meaning |
 |---|---|---|
-| `--harness <tmux\|herdr>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
-| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name or a tmux `-L` socket name. |
+| `--harness <tmux\|herdr\|cmux>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
+| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name, a tmux `-L` socket name, or a cmux socket path. |
 | `--pretty` | | Indent single-object output. Lists stay JSON Lines. |
 | `--log-level <level>` | `RUST_LOG` | `debug`, `info`, `warn` (default), or `error`. |
 
@@ -121,6 +121,15 @@ status is `unknown` and the confidence is `none`.
 to select a Herdr session. Herdr reports status natively, so the tool
 ignores `--patterns`.
 
+**cmux.** A handle is a terminal surface UUID. `pane spawn` opens a
+workspace for each agent and rejects `--workspace`. Status is native
+when the agent has cmux's hooks: Claude Code through cmux's wrapper,
+other agents after `cmux hooks setup <agent>`. Otherwise `pane status`
+needs `--patterns`. `pane read --ansi` and `workspace tag` are
+unsupported. `--session` is the socket path. To drive cmux from outside
+a cmux terminal, set `automation.socketControlMode` to `password` in
+`~/.config/cmux/cmux.json`. Inside a cmux terminal you do not need it.
+
 ## Windows
 
 Windows supports Herdr only. tmux does not run natively on Windows, so
@@ -129,7 +138,8 @@ non-agent commands for PowerShell panes. A pane that runs `cmd.exe` will
 not parse them. The quoting rejects an argument that is empty, contains
 a double quote, or ends with a backslash, because Windows PowerShell 5.1
 mangles them. Run `docs/windows-smoke.ps1` inside Herdr to check an
-install.
+install. cmux runs on macOS only, so `--harness cmux` fails with
+`harness_unavailable` on other systems.
 
 ## PowerShell
 
@@ -158,7 +168,9 @@ cargo test --locked
 ```
 
 Integration tests use private servers only. They never touch your own
-tmux server or a Herdr session that they did not create.
+tmux server or a Herdr session that they did not create. The cmux
+integration test skips unless `cmux ping` answers. It creates and closes
+only workspaces named `md-test-…`.
 
 ## License
 

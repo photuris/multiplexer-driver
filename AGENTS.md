@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`multiplexer-driver` is a Rust CLI that drives tmux and Herdr. See
+`multiplexer-driver` is a Rust CLI that drives tmux, Herdr, and cmux. See
 `README.md` for use. The design is in
 `docs/superpowers/specs/2026-09-30-multiplexer-driver-design.md`.
 
@@ -38,7 +38,9 @@
 - Handles are stable harness IDs. They survive a rename. Index-based
   addresses change when windows renumber.
 - `pane kill` closes one pane. It never closes the tab or workspace.
-  Callers must not lose sibling panes.
+  Callers must not lose sibling panes. On cmux the last surface of a
+  workspace cannot close alone, so `pane kill` closes the
+  then-empty workspace with it; no sibling is lost.
 - tmux labels live in `@md-label`, not in the pane title. Agents
   rewrite the title all the time.
 - Herdr `pane read` needs `--source visible`. Herdr 0.8.2 fails without
@@ -56,4 +58,22 @@
   `agent wait`, so behavior is the same on every harness.
 - Integration tests use private servers only: tmux `-L`, and a Herdr
   session named `md-test-<pid>`.
+- cmux handle = surface UUID, because `surface:N` refs are positional
+  and shift when something closes.
+- cmux `pane spawn` creates a workspace, one per agent, so every agent
+  stays visible in the sidebar.
+- `new-split` in cmux 0.64.22 has no `--command`, so the driver pastes
+  the line through `rpc terminal.paste`.
+- cmux `rename-tab` and `close-surface` need `--workspace`, which the
+  driver finds through `tree --all`.
+- cmux refuses to close the last surface of a workspace, so `pane kill`
+  closes the workspace then.
+- cmux status comes from `cmux sessions --json --surface`. `needsInput`
+  also fires for an agent idle for about a minute, so `blocked` on cmux
+  means "read the pane".
+- `cmux send` rewrites `\n` and `\t`, so prompt text goes through the
+  paste method.
+- `CMUX_QUIET=1` silences cmux deprecation notices.
+- The cmux integration test skips unless `cmux ping` answers. From
+  outside a cmux terminal that needs the password socket mode.
 - Open item: tmux conversation IDs are not done (spec section 12).
