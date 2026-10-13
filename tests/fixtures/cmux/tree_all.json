@@ -1,0 +1,210 @@
+{
+  "active": {
+    "is_browser_surface": false,
+    "pane_id": "AB1EC2BB-6478-44F0-AD5D-1962E434A79C",
+    "surface_id": "EE26CB81-CD29-4762-B515-7A23310729B3",
+    "surface_type": "terminal",
+    "tab_id": "EE26CB81-CD29-4762-B515-7A23310729B3",
+    "window_id": "AADBFA91-B6E4-47D5-95F8-A88F584F9D87",
+    "workspace_id": "8E9D74DC-7771-4FD6-B127-95015AC1FB75"
+  },
+  "caller": null,
+  "windows": [
+    {
+      "active": true,
+      "current": true,
+      "id": "AADBFA91-B6E4-47D5-95F8-A88F584F9D87",
+      "index": 0,
+      "key": false,
+      "selected_workspace_id": "8E9D74DC-7771-4FD6-B127-95015AC1FB75",
+      "visible": true,
+      "workspace_count": 4,
+      "workspaces": [
+        {
+          "active": false,
+          "description": null,
+          "id": "5E20F894-5AEE-4DAB-9E37-A38278D1751D",
+          "index": 0,
+          "panes": [
+            {
+              "active": false,
+              "focused": true,
+              "id": "91E3548A-3F3E-4CC9-951F-026C7FCF64FB",
+              "index": 0,
+              "selected_surface_id": "4198F9DC-3B4A-444D-A428-47C2A9E1A58B",
+              "surface_count": 1,
+              "surface_ids": [
+                "4198F9DC-3B4A-444D-A428-47C2A9E1A58B"
+              ],
+              "surfaces": [
+                {
+                  "active": false,
+                  "focused": true,
+                  "here": false,
+                  "id": "4198F9DC-3B4A-444D-A428-47C2A9E1A58B",
+                  "index": 0,
+                  "index_in_pane": 0,
+                  "pane_id": "91E3548A-3F3E-4CC9-951F-026C7FCF64FB",
+                  "selected": true,
+                  "selected_in_pane": true,
+                  "title": "/home/u",
+                  "tty": "ttys001",
+                  "type": "terminal",
+                  "url": null
+                }
+              ]
+            }
+          ],
+          "pinned": false,
+          "selected": false,
+          "title": "group-1"
+        },
+        {
+          "active": true,
+          "description": null,
+          "id": "8E9D74DC-7771-4FD6-B127-95015AC1FB75",
+          "index": 1,
+          "panes": [
+            {
+              "active": true,
+              "focused": true,
+              "id": "AB1EC2BB-6478-44F0-AD5D-1962E434A79C",
+              "index": 0,
+              "selected_surface_id": "EE26CB81-CD29-4762-B515-7A23310729B3",
+              "surface_count": 1,
+              "surface_ids": [
+                "EE26CB81-CD29-4762-B515-7A23310729B3"
+              ],
+              "surfaces": [
+                {
+                  "active": true,
+                  "focused": true,
+                  "here": false,
+                  "id": "EE26CB81-CD29-4762-B515-7A23310729B3",
+                  "index": 0,
+                  "index_in_pane": 0,
+                  "pane_id": "AB1EC2BB-6478-44F0-AD5D-1962E434A79C",
+                  "selected": true,
+                  "selected_in_pane": true,
+                  "title": "~/proj/a",
+                  "tty": "ttys002",
+                  "type": "terminal",
+                  "url": null
+                }
+              ]
+            }
+          ],
+          "pinned": false,
+          "selected": true,
+          "title": "~/proj/a"
+        },
+        {
+          "active": false,
+          "description": null,
+          "id": "C186ACAD-97FE-4220-ACBD-A656BB4155F3",
+          "index": 2,
+          "panes": [
+            {
+              "active": false,
+              "focused": true,
+              "id": "D764EC83-3B9E-4BDE-9105-8C1346692175",
+              "index": 0,
+              "selected_surface_id": "5735B821-3518-42F9-8016-42BC65CBD13B",
+              "surface_count": 1,
+              "surface_ids": [
+                "5735B821-3518-42F9-8016-42BC65CBD13B"
+              ],
+              "surfaces": [
+                {
+                  "active": false,
+                  "focused": true,
+                  "here": false,
+                  "id": "5735B821-3518-42F9-8016-42BC65CBD13B",
+                  "index": 0,
+                  "index_in_pane": 0,
+                  "pane_id": "D764EC83-3B9E-4BDE-9105-8C1346692175",
+                  "selected": true,
+                  "selected_in_pane": true,
+                  "title": "~/proj/b",
+                  "tty": "ttys066",
+                  "type": "terminal",
+                  "url": null
+                }
+              ]
+            }
+          ],
+          "pinned": false,
+          "selected": false,
+          "title": "group-2"
+        },
+        {
+          "active": false,
+          "description": null,
+          "id": "3543ECC9-B2A1-4751-9961-1695A3EC1222",
+          "index": 3,
+          "panes": [
+            {
+              "active": false,
+              "focused": true,
+              "id": "C821ED94-AD86-4FBF-9788-EFF3D8ECB8DB",
+              "index": 0,
+              "selected_surface_id": "9368A7E3-DCC1-4510-8DD6-DB8A819770F8",
+              "surface_count": 1,
+              "surface_ids": [
+                "9368A7E3-DCC1-4510-8DD6-DB8A819770F8"
+              ],
+              "surfaces": [
+                {
+                  "active": false,
+                  "focused": true,
+                  "here": false,
+                  "id": "9368A7E3-DCC1-4510-8DD6-DB8A819770F8",
+                  "index": 0,
+                  "index_in_pane": 0,
+                  "pane_id": "C821ED94-AD86-4FBF-9788-EFF3D8ECB8DB",
+                  "selected": true,
+                  "selected_in_pane": true,
+                  "title": "\u2733 Pong reply test",
+                  "tty": null,
+                  "type": "terminal",
+                  "url": null
+                }
+              ]
+            },
+            {
+              "active": false,
+              "focused": false,
+              "id": "CC6C90F3-B7F0-4917-8C19-C48B2004C2C3",
+              "index": 1,
+              "selected_surface_id": "07D78352-9AA8-4659-AE71-E0F03ECB3961",
+              "surface_count": 1,
+              "surface_ids": [
+                "07D78352-9AA8-4659-AE71-E0F03ECB3961"
+              ],
+              "surfaces": [
+                {
+                  "active": false,
+                  "focused": false,
+                  "here": false,
+                  "id": "07D78352-9AA8-4659-AE71-E0F03ECB3961",
+                  "index": 1,
+                  "index_in_pane": 0,
+                  "pane_id": "CC6C90F3-B7F0-4917-8C19-C48B2004C2C3",
+                  "selected": true,
+                  "selected_in_pane": true,
+                  "title": "Terminal",
+                  "tty": null,
+                  "type": "terminal",
+                  "url": null
+                }
+              ]
+            }
+          ],
+          "pinned": false,
+          "selected": false,
+          "title": "md-test-probe-renamed"
+        }
+      ]
+    }
+  ]
+}

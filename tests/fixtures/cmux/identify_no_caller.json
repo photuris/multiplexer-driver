@@ -1,0 +1,7 @@
+{
+  "app_bundle_path" : "/Applications/cmux.app",
+  "bundle_identifier" : "com.cmuxterm.app",
+  "caller" : null,
+  "focused" : null,
+  "socket_path" : "/home/u/.local/state/cmux/cmux.sock"
+}

@@ -1,0 +1,10 @@
+{
+  "base64" : "Ci90bXAg4pyXIGVjaG8gaGVsbG8tJCgoNDArMikpCmhlbGxvLTQyCgovdG1wIOKdryA=",
+  "surface_id" : "9368A7E3-DCC1-4510-8DD6-DB8A819770F8",
+  "surface_ref" : "surface:4",
+  "text" : "\n/tmp ✗ echo hello-$((40+2))\nhello-42\n\n/tmp ❯ \n\n",
+  "window_id" : "AADBFA91-B6E4-47D5-95F8-A88F584F9D87",
+  "window_ref" : "window:1",
+  "workspace_id" : "3543ECC9-B2A1-4751-9961-1695A3EC1222",
+  "workspace_ref" : "workspace:4"
+}
