@@ -576,7 +576,7 @@ fn should_split_paste_then_rename_when_split() {
         params,
         serde_json::json!({
             "surface_id": SPLIT_SURFACE,
-            "text": "bash -c 'echo hi'",
+            "text": "cd /tmp && bash -c 'echo hi'",
             "submit_key": "return",
         })
     );
@@ -836,7 +836,9 @@ fn should_exit_1_when_error_code_unknown() {
 
 #[test]
 fn should_prefix_socket_and_scrub_env_when_session_given() {
-    let fake = Fake::new().env("CMUX_SOCKET_PATH", "/from/env.sock");
+    let fake = Fake::new()
+        .env("CMUX_SOCKET_PATH", "/from/env.sock")
+        .env("CMUX_SOCKET", "/from/env.sock");
 
     let output =
         fake.run(&["--session", SOCKET, "pane", "read", S4, "--lines", "3"]);
@@ -859,8 +861,11 @@ fn should_prefix_socket_and_scrub_env_when_session_given() {
         ])
     );
     assert_eq!(
-        calls[0].env.get("CMUX_SOCKET_PATH").map(String::as_str),
-        Some("unset"),
+        (
+            calls[0].env.get("CMUX_SOCKET_PATH").map(String::as_str),
+            calls[0].env.get("CMUX_SOCKET").map(String::as_str),
+        ),
+        (Some("unset"), Some("unset")),
         "the ambient socket must not leak into the child"
     );
 }
@@ -971,6 +976,48 @@ fn should_close_workspace() {
     assert_eq!(
         fake.calls()[0].argv,
         argv(&["close-workspace", "--workspace", W4])
+    );
+}
+
+#[test]
+fn should_ignore_session_that_is_not_active_for_surface() {
+    let fake = Fake::new().env("FAKE_CMUX_SESSIONS", "sessions_inactive.json");
+
+    let value = ok_json(&fake.run(&["pane", "status", S4]));
+
+    assert_eq!(value["status"], "unknown");
+    assert_eq!(value["confidence"], "none");
+}
+
+#[test]
+fn should_exit_1_when_paste_is_not_submitted() {
+    let fake =
+        Fake::new().env("FAKE_CMUX_PASTE", "terminal_paste_unsubmitted.json");
+
+    let output = fake.run(&["pane", "prompt", S4, "--text", "hi"]);
+
+    assert_eq!(
+        (code(&output), error_type(&output).as_str()),
+        (1, "unexpected")
+    );
+}
+
+#[test]
+fn should_exit_6_when_split_paste_is_not_submitted() {
+    let fake =
+        Fake::new().env("FAKE_CMUX_PASTE", "terminal_paste_unsubmitted.json");
+
+    let output = fake.run(&[
+        "pane", "split", S4, "--name", "impl-2", "--cwd", "/tmp", "--", "bash",
+    ]);
+
+    assert_eq!(
+        (code(&output), error_type(&output).as_str()),
+        (6, "start_failed")
+    );
+    assert_eq!(
+        json(&output),
+        serde_json::json!({ "handle": SPLIT_SURFACE, "started": false })
     );
 }
 

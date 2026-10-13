@@ -5,6 +5,7 @@
 # Log format, appended to FAKE_CMUX_LOG per call:
 #   #call
 #   #env CMUX_SOCKET_PATH=<value or unset>
+#   #env CMUX_SOCKET=<value or unset>
 #   #env CMUX_QUIET=<value or unset>
 #   <tab><argv[0]>
 #   <tab><argv[1]>
@@ -13,13 +14,15 @@
 # FAKE_CMUX_FAIL names a command (after any --socket pair) that must
 # fail: it prints FAKE_CMUX_FAIL_WITH (default err_not_found.txt) to
 # stderr and exits 1. FAKE_CMUX_SESSIONS picks the file `sessions`
-# prints (default sessions.json).
+# prints (default sessions.json); FAKE_CMUX_PASTE picks the file `rpc`
+# prints (default terminal_paste.json).
 log="${FAKE_CMUX_LOG:?FAKE_CMUX_LOG is required}"
 fx="${FAKE_CMUX_FIXTURES:?FAKE_CMUX_FIXTURES is required}"
 
 {
     echo '#call'
     echo "#env CMUX_SOCKET_PATH=${CMUX_SOCKET_PATH-unset}"
+    echo "#env CMUX_SOCKET=${CMUX_SOCKET-unset}"
     echo "#env CMUX_QUIET=${CMUX_QUIET-unset}"
     for a; do printf '\t%s\n' "$a"; done
 } >> "$log"
@@ -39,7 +42,7 @@ case "$cmd" in
     new-split) cat "$fx/new_split.txt" ;;
     identify) cat "$fx/identify.json" ;;
     read-screen) cat "$fx/read_screen.json" ;;
-    rpc) cat "$fx/terminal_paste.json" ;;
+    rpc) cat "$fx/${FAKE_CMUX_PASTE:-terminal_paste.json}" ;;
     rename-tab) cat "$fx/rename_tab.txt" ;;
     send-key) cat "$fx/send_key.txt" ;;
     close-surface) cat "$fx/close_surface.json" ;;
