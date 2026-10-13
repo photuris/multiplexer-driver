@@ -24,7 +24,7 @@ use multiplexer_driver::{
     patterns::Patterns,
     process::{CEILING, output_within},
 };
-use serde_json::Value;
+use serde::Deserialize;
 
 /// Runs `program args…` quietly under the ceiling.
 fn tool_output(
@@ -43,13 +43,37 @@ fn cmux_output(args: &[&str]) -> io::Result<std::process::Output> {
     tool_output(Path::new("cmux"), args)
 }
 
+/// The part of `cmux tree --json` the snapshot needs; every field is
+/// required, so a malformed tree is an error, not an empty list.
+#[derive(Debug, Deserialize)]
+struct Tree {
+    /// Every window.
+    windows: Vec<TreeWindow>,
+}
+
+/// One window of the tree.
+#[derive(Debug, Deserialize)]
+struct TreeWindow {
+    /// The window's workspaces.
+    workspaces: Vec<TreeWorkspace>,
+}
+
+/// One workspace of the tree.
+#[derive(Debug, Deserialize)]
+struct TreeWorkspace {
+    /// The workspace UUID.
+    id: String,
+    /// The workspace title.
+    title: String,
+}
+
 /// Every `(workspace id, title)` in every window, read through
 /// `program tree`.
 ///
 /// # Errors
 ///
 /// Returns a message when the call fails, exits nonzero, or prints
-/// something other than the tree JSON.
+/// something other than the expected tree JSON.
 fn workspaces_from(program: &Path) -> Result<Vec<(String, String)>, String> {
     let output = tool_output(
         program,
@@ -61,16 +85,13 @@ fn workspaces_from(program: &Path) -> Result<Vec<(String, String)>, String> {
         return Err(format!("cmux tree exited with {}", output.status));
     }
 
-    let tree: Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("cmux tree is not JSON: {e}"))?;
-    let all = tree["windows"]
-        .as_array()
+    let tree: Tree = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("cmux tree has an unexpected shape: {e}"))?;
+    let all = tree
+        .windows
         .into_iter()
-        .flatten()
-        .flat_map(|w| w["workspaces"].as_array().into_iter().flatten())
-        .filter_map(|w| {
-            Some((w["id"].as_str()?.to_string(), w["title"].as_str()?.into()))
-        })
+        .flat_map(|w| w.workspaces)
+        .map(|w| (w.id, w.title))
         .collect();
 
     Ok(all)
@@ -225,6 +246,16 @@ mod workspace_snapshot {
     }
 
     #[test]
+    fn should_fail_snapshot_when_tree_shape_invalid() {
+        let program = fake("shape", "echo '{}'");
+        let result = workspaces_from(&program);
+
+        let _ = fs::remove_file(&program);
+
+        assert!(result.is_err(), "got {result:?}");
+    }
+
+    #[test]
     fn should_list_workspaces_when_tree_succeeds() {
         let program = fake(
             "ok",
@@ -247,6 +278,7 @@ mod cmux_driver {
     fn should_drive_cmux_when_app_reachable() {
         if !reachable() {
             eprintln!("skipping: cmux is not reachable");
+
             return;
         }
 
