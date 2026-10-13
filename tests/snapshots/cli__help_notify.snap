@@ -4,7 +4,7 @@ expression: "String::from_utf8_lossy(&output.stdout)"
 ---
 Show a desktop notification to the user.
 
-Prints {"sent":bool,"method":…,"reason":…}. Uses Herdr inside Herdr, else notify-send, else osascript; none available is not an error. Ignores --harness and --session.
+Prints {"sent":bool,"method":…,"reason":…}. Uses Herdr inside Herdr, else cmux inside cmux, else notify-send, else osascript; none available is not an error. Ignores --harness and --session.
 
 Example: multiplexer-driver notify --message "build done"
 
@@ -17,6 +17,7 @@ Options:
           Possible values:
           - tmux:  tmux
           - herdr: Herdr
+          - cmux:  cmux (macOS)
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
@@ -24,7 +25,7 @@ Options:
           Notification body
 
       --session <SESSION>
-          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, or a cmux socket path. Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 

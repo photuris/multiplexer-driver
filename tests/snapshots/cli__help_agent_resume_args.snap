@@ -17,6 +17,7 @@ Options:
           Possible values:
           - tmux:  tmux
           - herdr: Herdr
+          - cmux:  cmux (macOS)
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
@@ -24,7 +25,7 @@ Options:
           Agent kind
 
       --session <SESSION>
-          Harness server to use: a Herdr session name or a tmux -L socket name. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, or a cmux socket path. Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 

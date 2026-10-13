@@ -1,9 +1,10 @@
-//! Drive terminal multiplexer harnesses (tmux, Herdr) and the coding
+//! Drive terminal multiplexer harnesses (tmux, Herdr, cmux) and the coding
 //! agents inside them through one vocabulary of workspaces, tabs, and
 //! panes. See the design spec in `docs/superpowers/specs/`.
 
 pub mod agents;
 pub mod cli;
+pub mod cmux;
 pub mod driver;
 pub mod herdr;
 pub mod model;
@@ -38,6 +39,8 @@ pub enum Harness {
     Tmux,
     /// Herdr.
     Herdr,
+    /// cmux (macOS).
+    Cmux,
 }
 
 /// Builds the driver for `harness`.
@@ -55,6 +58,7 @@ pub fn driver_for(
     Ok(match harness {
         Harness::Tmux => Box::new(tmux::Tmux::new(session, patterns)),
         Harness::Herdr => Box::new(herdr::Herdr::new(session)),
+        Harness::Cmux => Box::new(cmux::Cmux::new(session, patterns)),
     })
 }
 
@@ -93,10 +97,12 @@ pub fn run(cli: Cli, out: &mut dyn Write) -> Result<()> {
             let harness = cli
                 .harness
                 .ok_or_else(|| Error::Usage("--harness is required".into()))?;
-            // The patterns file is a tmux concept; Herdr ignores it, even
-            // when it is missing or invalid.
+            // The patterns file is a tmux and cmux concept; Herdr ignores
+            // it, even when it is missing or invalid.
             let patterns = match (harness, patterns_path(&command)) {
-                (Harness::Tmux, Some(path)) => Some(Patterns::load(path)?),
+                (Harness::Tmux | Harness::Cmux, Some(path)) => {
+                    Some(Patterns::load(path)?)
+                }
                 _ => None,
             };
             let driver =

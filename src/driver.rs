@@ -230,7 +230,9 @@ pub trait Driver {
         Err(unsupported(self.name(), "pane interrupt"))
     }
 
-    /// Closes this pane only, never its tab or workspace.
+    /// Closes this pane only, never its tab or workspace. The one
+    /// exception is cmux, which cannot keep an empty workspace: it
+    /// closes the workspace that refused to close its last surface.
     ///
     /// # Errors
     ///

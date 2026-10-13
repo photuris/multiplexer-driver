@@ -10,7 +10,7 @@ use crate::{
     model::{Direction, Status},
 };
 
-/// Drive tmux and Herdr workspaces, panes, and coding agents.
+/// Drive tmux, Herdr, and cmux workspaces, panes, and coding agents.
 ///
 /// stdout carries JSON (one object, or JSON Lines for lists). On failure
 /// the last stderr line is {"error":{"type":…,"message":…}}.
@@ -24,8 +24,8 @@ pub struct Cli {
     /// Harness to drive. Required for workspace, pane, and raw.
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_HARNESS")]
     pub harness: Option<Harness>,
-    /// Harness server to use: a Herdr session name or a tmux -L socket
-    /// name. Unset uses the ambient server.
+    /// Harness server to use: a Herdr session name, a tmux -L socket
+    /// name, or a cmux socket path. Unset uses the ambient server.
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_SESSION")]
     pub session: Option<String>,
     /// Indent single-object output. Lists stay JSON Lines.
@@ -54,8 +54,8 @@ pub enum Command {
     /// Show a desktop notification to the user.
     ///
     /// Prints {"sent":bool,"method":…,"reason":…}. Uses Herdr inside
-    /// Herdr, else notify-send, else osascript; none available is not an
-    /// error. Ignores --harness and --session.
+    /// Herdr, else cmux inside cmux, else notify-send, else osascript;
+    /// none available is not an error. Ignores --harness and --session.
     ///
     /// Example: multiplexer-driver notify --message "build done"
     Notify(NotifyArgs),
@@ -219,21 +219,24 @@ pub enum PaneCommand {
     /// Report the agent status of a pane.
     ///
     /// Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs
-    /// --patterns for a signal; Herdr reports natively and ignores it.
+    /// --patterns for a signal; cmux uses them only when the pane's agent
+    /// reports no usable lifecycle; Herdr reports natively and ignores
+    /// them.
     ///
     /// Example: multiplexer-driver --harness tmux pane status %1
     /// --patterns patterns.json
     Status {
         /// Pane handle.
         handle: String,
-        /// JSON file of idle and blocked regexes (tmux only).
+        /// JSON file of idle and blocked regexes (tmux and cmux).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },
     /// Wait until a pane reaches a status.
     ///
     /// Polls every 500 ms and prints the StatusResult that matched. Exits
-    /// 7 on timeout. tmux requires --patterns.
+    /// 7 on timeout. tmux requires --patterns; cmux uses them only when
+    /// the pane's agent reports no usable lifecycle; Herdr ignores them.
     ///
     /// Example: multiplexer-driver --harness tmux pane wait %1 --timeout
     /// 5m --until idle --patterns patterns.json
@@ -246,7 +249,7 @@ pub enum PaneCommand {
         /// Status to wait for (repeatable). Default: idle and blocked.
         #[arg(long)]
         until: Vec<Status>,
-        /// JSON file of idle and blocked regexes (tmux only).
+        /// JSON file of idle and blocked regexes (tmux and cmux).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },
