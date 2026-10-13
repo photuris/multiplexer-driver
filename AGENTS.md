@@ -56,8 +56,11 @@
 - Herdr tags are `tokens`. They are readable and merged across sources.
 - Wait is one poll loop for all harnesses. It does not use Herdr
   `agent wait`, so behavior is the same on every harness.
-- Integration tests use private servers only: tmux `-L`, and a Herdr
-  session named `md-test-<pid>`.
+- tmux and Herdr integration tests use private servers only: tmux `-L`,
+  and a Herdr session named `md-test-<pid>`. The cmux test has no
+  private server. It uses isolated `md-test-<pid>-<nanos>` workspaces in
+  the shared app, and a failed snapshot of the preexisting workspaces
+  panics it before it creates anything.
 - cmux handle = surface UUID, because `surface:N` refs are positional
   and shift when something closes.
 - cmux `pane spawn` creates a workspace, one per agent, so every agent

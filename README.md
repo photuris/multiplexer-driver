@@ -167,10 +167,12 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --locked
 ```
 
-Integration tests use private servers only. They never touch your own
-tmux server or a Herdr session that they did not create. The cmux
-integration test skips unless `cmux ping` answers. It creates and closes
-only workspaces named `md-test-…`.
+The tmux and Herdr integration tests use private servers only. They
+never touch your own tmux server or a Herdr session that they did not
+create. cmux has no private server, so its integration test runs in your
+running app, in workspaces that it creates and names `md-test-…`. It
+reads the workspace list first, fails if it cannot, and closes only
+workspaces that it created. It skips unless `cmux ping` answers.
 
 ## License
 

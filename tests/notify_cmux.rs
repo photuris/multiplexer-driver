@@ -90,6 +90,7 @@ fn make_executable(path: &Path) -> io::Result<()> {
 /// Writes an executable `/bin/sh` script with the given body.
 fn write_script(path: &Path, body: &str) -> io::Result<()> {
     fs::write(path, format!("#!/bin/sh\n{body}\n"))?;
+
     make_executable(path)
 }
 
@@ -116,113 +117,118 @@ fn os_line() -> String {
     format!("{{\"sent\":true,\"method\":\"{OS_METHOD}\",\"reason\":null}}\n")
 }
 
-#[test]
-fn should_notify_through_cmux_when_inside_cmux() {
-    let sandbox = Sandbox::new().unwrap();
-    let output =
-        sandbox.notify(&[("CMUX_SOCKET_PATH", "/tmp/md-notify.sock")]);
-    let log = fs::read_to_string(sandbox.log()).unwrap_or_default();
-    let argv: Vec<&str> =
-        log.lines().filter_map(|l| l.strip_prefix('\t')).collect();
+#[cfg(test)]
+mod notify {
+    use super::*;
 
-    assert_eq!(
-        (output.status.code(), stdout(&output).as_str()),
-        (
-            Some(0),
-            "{\"sent\":true,\"method\":\"cmux\",\"reason\":null}\n"
+    #[test]
+    fn should_notify_through_cmux_when_inside_cmux() {
+        let sandbox = Sandbox::new().unwrap();
+        let output =
+            sandbox.notify(&[("CMUX_SOCKET_PATH", "/tmp/md-notify.sock")]);
+        let log = fs::read_to_string(sandbox.log()).unwrap_or_default();
+        let argv: Vec<&str> =
+            log.lines().filter_map(|l| l.strip_prefix('\t')).collect();
+
+        assert_eq!(
+            (output.status.code(), stdout(&output).as_str()),
+            (
+                Some(0),
+                "{\"sent\":true,\"method\":\"cmux\",\"reason\":null}\n"
+            )
+        );
+        assert!(log.lines().any(|l| l == "#env CMUX_QUIET=1"), "log {log:?}");
+        assert_eq!(
+            argv,
+            ["notify", "--title", "Overseer", "--body", "plan ready"]
+        );
+    }
+
+    #[test]
+    fn should_fall_back_to_os_notifier_when_socket_variable_absent() {
+        let sandbox = Sandbox::new().unwrap();
+        let output = sandbox.notify(&[]);
+
+        assert_eq!(
+            (
+                output.status.code(),
+                stdout(&output),
+                sandbox.log().exists()
+            ),
+            (Some(0), os_line(), false)
+        );
+    }
+
+    #[test]
+    fn should_skip_cmux_when_socket_variable_empty() {
+        let sandbox = Sandbox::new().unwrap();
+        let output = sandbox.notify(&[("CMUX_SOCKET_PATH", "")]);
+
+        assert_eq!(
+            (
+                output.status.code(),
+                stdout(&output),
+                sandbox.log().exists()
+            ),
+            (Some(0), os_line(), false)
+        );
+    }
+
+    #[test]
+    fn should_exit_1_when_cmux_fails() {
+        let sandbox = Sandbox::new().unwrap();
+        let output = sandbox.notify(&[
+            ("CMUX_SOCKET_PATH", "/tmp/md-notify.sock"),
+            ("FAKE_CMUX_FAIL", "notify"),
+        ]);
+
+        assert_eq!(
+            (output.status.code(), error_type(&output).as_str()),
+            (Some(1), "unexpected")
+        );
+    }
+
+    #[test]
+    fn should_fall_back_when_cmux_is_not_installed() {
+        let sandbox = Sandbox::new().unwrap();
+
+        fs::remove_file(sandbox.dir.join("cmux")).unwrap();
+
+        let output =
+            sandbox.notify(&[("CMUX_SOCKET_PATH", "/tmp/md-notify.sock")]);
+
+        assert_eq!(
+            (output.status.code(), stdout(&output)),
+            (Some(0), os_line())
+        );
+    }
+
+    #[test]
+    fn should_prefer_herdr_when_inside_herdr() {
+        let sandbox = Sandbox::new().unwrap();
+
+        write_script(
+            &sandbox.dir.join("herdr"),
+            "echo '{\"result\":{\"shown\":true}}'",
         )
-    );
-    assert!(log.lines().any(|l| l == "#env CMUX_QUIET=1"), "log {log:?}");
-    assert_eq!(
-        argv,
-        ["notify", "--title", "Overseer", "--body", "plan ready"]
-    );
-}
+        .unwrap();
 
-#[test]
-fn should_fall_back_to_os_notifier_when_socket_variable_absent() {
-    let sandbox = Sandbox::new().unwrap();
-    let output = sandbox.notify(&[]);
+        let output = sandbox.notify(&[
+            ("HERDR_ENV", "1"),
+            ("CMUX_SOCKET_PATH", "/tmp/md-notify.sock"),
+        ]);
 
-    assert_eq!(
-        (
-            output.status.code(),
-            stdout(&output),
-            sandbox.log().exists()
-        ),
-        (Some(0), os_line(), false)
-    );
-}
-
-#[test]
-fn should_skip_cmux_when_socket_variable_empty() {
-    let sandbox = Sandbox::new().unwrap();
-    let output = sandbox.notify(&[("CMUX_SOCKET_PATH", "")]);
-
-    assert_eq!(
-        (
-            output.status.code(),
-            stdout(&output),
-            sandbox.log().exists()
-        ),
-        (Some(0), os_line(), false)
-    );
-}
-
-#[test]
-fn should_exit_1_when_cmux_fails() {
-    let sandbox = Sandbox::new().unwrap();
-    let output = sandbox.notify(&[
-        ("CMUX_SOCKET_PATH", "/tmp/md-notify.sock"),
-        ("FAKE_CMUX_FAIL", "notify"),
-    ]);
-
-    assert_eq!(
-        (output.status.code(), error_type(&output).as_str()),
-        (Some(1), "unexpected")
-    );
-}
-
-#[test]
-fn should_fall_back_when_cmux_is_not_installed() {
-    let sandbox = Sandbox::new().unwrap();
-
-    fs::remove_file(sandbox.dir.join("cmux")).unwrap();
-
-    let output =
-        sandbox.notify(&[("CMUX_SOCKET_PATH", "/tmp/md-notify.sock")]);
-
-    assert_eq!(
-        (output.status.code(), stdout(&output)),
-        (Some(0), os_line())
-    );
-}
-
-#[test]
-fn should_prefer_herdr_when_inside_herdr() {
-    let sandbox = Sandbox::new().unwrap();
-
-    write_script(
-        &sandbox.dir.join("herdr"),
-        "echo '{\"result\":{\"shown\":true}}'",
-    )
-    .unwrap();
-
-    let output = sandbox.notify(&[
-        ("HERDR_ENV", "1"),
-        ("CMUX_SOCKET_PATH", "/tmp/md-notify.sock"),
-    ]);
-
-    assert_eq!(
-        (
-            output.status.code(),
-            stdout(&output).as_str(),
-            sandbox.log().exists()
-        ),
-        (
-            Some(0),
-            "{\"sent\":true,\"method\":\"herdr\",\"reason\":null}\n",
-            false
-        )
-    );
+        assert_eq!(
+            (
+                output.status.code(),
+                stdout(&output).as_str(),
+                sandbox.log().exists()
+            ),
+            (
+                Some(0),
+                "{\"sent\":true,\"method\":\"herdr\",\"reason\":null}\n",
+                false
+            )
+        );
+    }
 }
