@@ -536,6 +536,8 @@ fn should_split_paste_then_rename_when_split() {
         "impl-2",
         "--direction",
         "down",
+        "--cwd",
+        "/tmp",
         "--",
         "bash",
         "-c",
@@ -598,8 +600,9 @@ fn should_split_paste_then_rename_when_split() {
 fn should_default_split_direction_to_right() {
     let fake = Fake::new();
 
-    let output =
-        fake.run(&["pane", "split", S4, "--name", "impl-3", "--", "bash"]);
+    let output = fake.run(&[
+        "pane", "split", S4, "--name", "impl-3", "--cwd", "/tmp", "--", "bash",
+    ]);
 
     assert_eq!(code(&output), 0);
     assert_eq!(fake.calls()[0].argv[..2], argv(&["new-split", "right"]));
@@ -627,8 +630,9 @@ fn should_print_started_false_when_rename_fails_after_spawn() {
 fn should_print_started_false_when_paste_fails_after_split() {
     let fake = Fake::new().env("FAKE_CMUX_FAIL", "rpc");
 
-    let output =
-        fake.run(&["pane", "split", S4, "--name", "impl-2", "--", "bash"]);
+    let output = fake.run(&[
+        "pane", "split", S4, "--name", "impl-2", "--cwd", "/tmp", "--", "bash",
+    ]);
 
     assert_eq!(
         (code(&output), error_type(&output).as_str()),
