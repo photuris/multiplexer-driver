@@ -18,7 +18,7 @@ use crate::{
 pub struct NotifyResult {
     /// Whether the user saw it.
     pub sent: bool,
-    /// `herdr`, `notify-send`, `osascript`, or `none`.
+    /// `herdr`, `cmux`, `notify-send`, `osascript`, or `none`.
     pub method: &'static str,
     /// Herdr's reason when it did not show.
     pub reason: Option<String>,
@@ -42,7 +42,7 @@ struct HerdrShown {
 }
 
 /// Shows a notification through the first method available: Herdr,
-/// `notify-send`, `osascript`. Nothing available is not an error.
+/// cmux, `notify-send`, `osascript`. Nothing available is not an error.
 ///
 /// # Errors
 ///
@@ -53,6 +53,10 @@ pub fn send(
     sound: Option<&str>,
 ) -> Result<NotifyResult> {
     if let Some(result) = via_herdr(title, message, sound)? {
+        return Ok(result);
+    }
+
+    if let Some(result) = via_cmux(title, message)? {
         return Ok(result);
     }
 
@@ -87,11 +91,30 @@ fn via_herdr(
         args.extend(["--sound", sound]);
     }
 
-    let Some(output) = run_tool("herdr", &args)? else {
+    let Some(output) = run_tool("herdr", &args, &[])? else {
         return Ok(None);
     };
 
     parse_herdr_shown(&String::from_utf8_lossy(&output.stdout)).map(Some)
+}
+
+/// Uses cmux when running inside one of its terminals and the binary
+/// is on PATH. `CMUX_QUIET` keeps deprecation notices off stderr.
+fn via_cmux(title: &str, message: &str) -> Result<Option<NotifyResult>> {
+    if !env::var("CMUX_SOCKET_PATH").is_ok_and(|v| !v.is_empty()) {
+        return Ok(None);
+    }
+
+    Ok(run_tool(
+        "cmux",
+        &["notify", "--title", title, "--body", message],
+        &[("CMUX_QUIET", "1")],
+    )?
+    .map(|_| NotifyResult {
+        sent: true,
+        method: "cmux",
+        reason: None,
+    }))
 }
 
 /// Uses `notify-send` on Linux when it is on PATH.
@@ -103,13 +126,15 @@ fn via_notify_send(
         return Ok(None);
     }
 
-    Ok(run_tool("notify-send", &["--", title, message])?.map(|_| {
-        NotifyResult {
-            sent: true,
-            method: "notify-send",
-            reason: None,
-        }
-    }))
+    Ok(
+        run_tool("notify-send", &["--", title, message], &[])?.map(|_| {
+            NotifyResult {
+                sent: true,
+                method: "notify-send",
+                reason: None,
+            }
+        }),
+    )
 }
 
 /// Uses `osascript` on macOS when it is on PATH.
@@ -125,7 +150,7 @@ fn via_osascript(title: &str, message: &str) -> Result<Option<NotifyResult>> {
     );
 
     Ok(
-        run_tool("osascript", &["-e", &script])?.map(|_| NotifyResult {
+        run_tool("osascript", &["-e", &script], &[])?.map(|_| NotifyResult {
             sent: true,
             method: "osascript",
             reason: None,
@@ -133,11 +158,16 @@ fn via_osascript(title: &str, message: &str) -> Result<Option<NotifyResult>> {
     )
 }
 
-/// Runs `program`; `None` when it is not installed, an error when it
-/// fails, hangs, or exits nonzero.
-fn run_tool(program: &str, args: &[&str]) -> Result<Option<Output>> {
+/// Runs `program` with `args` and the extra environment `envs`; `None`
+/// when it is not installed, an error when it fails, hangs, or exits
+/// nonzero.
+fn run_tool(
+    program: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Option<Output>> {
     let output = match process::output_within(
-        Command::new(program).args(args),
+        Command::new(program).args(args).envs(envs.iter().copied()),
         process::CEILING,
     ) {
         Ok(output) => output,
