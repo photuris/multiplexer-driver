@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`multiplexer-driver` is a Rust CLI that drives tmux, Herdr, and cmux. See
+`multiplexer-driver` is a Rust CLI that drives tmux, Herdr, cmux, and tuios. See
 `README.md` for use. The design is in
 `docs/superpowers/specs/2026-09-30-multiplexer-driver-design.md`.
 
@@ -79,4 +79,25 @@
 - `CMUX_QUIET=1` silences cmux deprecation notices.
 - The cmux integration test skips unless `cmux ping` answers. From
   outside a cmux terminal that needs the password socket mode.
+- tuios handle = window UUID. `--session` is the tuios session name (`-s`);
+  the daemon comes from `XDG_RUNTIME_DIR`, which the driver never sets.
+- tuios workspaces are the nine numbered slots of a session. `workspace
+  create` and `workspace tag` are unsupported; `pane spawn --workspace`
+  is a usage error.
+- tuios `pane spawn` opens a window with no command, then types the
+  `shell_join` line with `send-text` and presses Enter.
+- tuios `pane split` needs an attached client and tiling on, or tuios
+  refuses; the driver passes the refusal through as `Unsupported` and
+  never enables tiling. The split inherits the target's directory, so
+  the request's cwd is ignored.
+- tuios `capture-pane` needs `--scrollback` for `--lines N`; without it
+  tuios reads only the visible screen.
+- tuios `raw` passes its arguments unchanged and does not add `-s`.
+- tuios status comes from `get-agent-state`: `working`, `idle`/`done`,
+  and `needs_input`/`errored` (blocked); `none` and `unknown` fall back
+  to `--patterns`.
+- The tuios integration test starts a daemon in `/tmp/tp.XXXXXX` (the
+  socket path limit rules out a deeper directory) and sets `TERM` for
+  its own attached client, because tuios refuses `TERM=dumb`. It needs
+  `script` and skips when `tuios` is missing.
 - Open item: tmux conversation IDs are not done (spec section 12).

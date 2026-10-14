@@ -1,6 +1,6 @@
 # multiplexer-driver
 
-`multiplexer-driver` is a command-line tool that controls tmux, Herdr, and cmux.
+`multiplexer-driver` is a command-line tool that controls tmux, Herdr, cmux, and tuios.
 It gives scripts and coding agents one set of commands for workspaces,
 panes, and the agents that run in them. Every result is JSON.
 
@@ -76,8 +76,8 @@ Global flags:
 
 | Flag | Environment variable | Meaning |
 |---|---|---|
-| `--harness <tmux\|herdr\|cmux>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
-| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name, a tmux `-L` socket name, or a cmux socket path. |
+| `--harness <tmux\|herdr\|cmux\|tuios>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
+| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name, a tmux `-L` socket name, a cmux socket path, or a tuios session name. |
 | `--pretty` | | Indent single-object output. Lists stay JSON Lines. |
 | `--log-level <level>` | `RUST_LOG` | `debug`, `info`, `warn` (default), or `error`. |
 
@@ -130,6 +130,19 @@ unsupported. `--session` is the socket path. To drive cmux from outside
 a cmux terminal, set `automation.socketControlMode` to `password` in
 `~/.config/cmux/cmux.json`. Inside a cmux terminal you do not need it.
 
+**tuios.** A handle is a window UUID. `--session` is the tuios session
+name, passed as `-s`; unset, the driver uses `TUIOS_SESSION` inside a
+tuios pane, else tuios picks the most recent session. The daemon is the
+one `XDG_RUNTIME_DIR` selects, so a private daemon needs that variable
+(and `XDG_STATE_HOME`) set for the driver. A `workspace` is a tuios
+workspace (1 to 9). `workspace create` and `workspace tag` are
+unsupported, `pane spawn` rejects `--workspace`, and `pane split` works
+only on a session with an attached client and tiling on; otherwise it
+exits 5 with tuios's own message. Status is native from the pane's
+agent state. A pane with no reported state falls back to `--patterns`,
+else `unknown`. `raw` passes its arguments to `tuios` unchanged and
+does not add `-s`. The tuios driver is tested on Linux only.
+
 ## Windows
 
 Windows supports Herdr only. tmux does not run natively on Windows, so
@@ -172,7 +185,11 @@ never touch your own tmux server or a Herdr session that they did not
 create. cmux has no private server, so its integration test runs in your
 running app, in workspaces that it creates and names `md-test-…`. It
 reads the workspace list first, fails if it cannot, and closes only
-workspaces that it created. It skips unless `cmux ping` answers.
+workspaces that it created. It skips unless `cmux ping` answers. The
+tuios integration test starts its own daemon in a private directory
+(`/tmp/tp.XXXXXX`), never touches yours, and removes the directory. It
+needs `script` (util-linux) to attach a client for the split scenarios,
+and it skips when `tuios` is not installed.
 
 ## License
 
