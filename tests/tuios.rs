@@ -75,6 +75,7 @@ fn private_command(program: impl AsRef<Path>, dir: &Path) -> Command {
 /// Creates a fresh `/tmp/tp.XXXXXX` directory, mode 0700. The path stays
 /// short because unix socket paths are limited in length.
 fn make_private_dir() -> PathBuf {
+    /// The characters a directory suffix draws from.
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 
     let mut seed = u64::from(std::process::id())
@@ -967,6 +968,7 @@ macro_rules! scenarios {
 fn tuios_driver_scenarios() {
     let Some(server) = Server::start() else {
         println!("tuios not installed; skipping");
+
         return;
     };
     let mut failures = Vec::new();
