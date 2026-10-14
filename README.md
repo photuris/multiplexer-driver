@@ -164,7 +164,9 @@ if ($LASTEXITCODE -ne 0) { "failed with exit code $LASTEXITCODE" }
 ## Raw access
 
 Use `raw` for any harness command that has no subcommand here. The tool
-applies `--session` and prints the harness stdout unchanged.
+applies `--session` and prints the harness stdout unchanged. The
+exception is tuios: `raw` does not add `-s`, so a tuios verb runs on the
+session tuios picks unless you pass the verb's own `-s <name>`.
 
 ```bash
 multiplexer-driver --harness herdr raw -- tab list --workspace w1
