@@ -18,6 +18,7 @@ Options:
           - tmux:  tmux
           - herdr: Herdr
           - cmux:  cmux (macOS)
+          - tuios: tuios
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
@@ -28,7 +29,7 @@ Options:
           Root directory; defaults to the current directory
 
       --session <SESSION>
-          Harness server to use: a Herdr session name, a tmux -L socket name, or a cmux socket path. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, a cmux socket path, or a tuios session name. Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 

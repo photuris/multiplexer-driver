@@ -1,0 +1,11 @@
+{
+  "boot_id": "49b116343fa1057e",
+  "content": "                                                                              \n\u001b[36;1m/tmp\u001b[m \u001b[32m⬢ v26.7.0 \u001b[36;1m❯\u001b[m echo hello-$((40+2))                                         \nhello-42                                                                      \necho x                                                                        \n                                                                              \n\u001b[36;1m/tmp\u001b[m \u001b[32m⬢ v26.7.0 \u001b[36;1m❯\u001b[m echo x                                                       \nx                                                                             \n                                                                              \n\u001b[36;1m/tmp\u001b[m \u001b[32m⬢ v26.7.0 \u001b[36;1m❯\u001b[m                                                              ",
+  "history_rows": 0,
+  "message": "command executed",
+  "resolved": false,
+  "revision": 462,
+  "source": "recent",
+  "styled": true,
+  "success": true
+}

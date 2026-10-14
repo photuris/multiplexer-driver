@@ -10,7 +10,7 @@ use crate::{
     model::{Direction, Status},
 };
 
-/// Drive tmux, Herdr, and cmux workspaces, panes, and coding agents.
+/// Drive tmux, Herdr, cmux, and tuios workspaces, panes, and coding agents.
 ///
 /// stdout carries JSON (one object, or JSON Lines for lists). On failure
 /// the last stderr line is {"error":{"type":…,"message":…}}.
@@ -25,7 +25,8 @@ pub struct Cli {
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_HARNESS")]
     pub harness: Option<Harness>,
     /// Harness server to use: a Herdr session name, a tmux -L socket
-    /// name, or a cmux socket path. Unset uses the ambient server.
+    /// name, a cmux socket path, or a tuios session name. Unset uses the
+    /// ambient server.
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_SESSION")]
     pub session: Option<String>,
     /// Indent single-object output. Lists stay JSON Lines.
@@ -219,24 +220,25 @@ pub enum PaneCommand {
     /// Report the agent status of a pane.
     ///
     /// Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs
-    /// --patterns for a signal; cmux uses them only when the pane's agent
-    /// reports no usable lifecycle; Herdr reports natively and ignores
-    /// them.
+    /// --patterns for a signal; cmux and tuios use them only when the
+    /// pane's agent reports no usable state; Herdr reports natively and
+    /// ignores them.
     ///
     /// Example: multiplexer-driver --harness tmux pane status %1
     /// --patterns patterns.json
     Status {
         /// Pane handle.
         handle: String,
-        /// JSON file of idle and blocked regexes (tmux and cmux).
+        /// JSON file of idle and blocked regexes (tmux, cmux, tuios).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },
     /// Wait until a pane reaches a status.
     ///
     /// Polls every 500 ms and prints the StatusResult that matched. Exits
-    /// 7 on timeout. tmux requires --patterns; cmux uses them only when
-    /// the pane's agent reports no usable lifecycle; Herdr ignores them.
+    /// 7 on timeout. tmux requires --patterns; cmux and tuios use them
+    /// only when the pane's agent reports no usable state; Herdr ignores
+    /// them.
     ///
     /// Example: multiplexer-driver --harness tmux pane wait %1 --timeout
     /// 5m --until idle --patterns patterns.json
@@ -249,7 +251,7 @@ pub enum PaneCommand {
         /// Status to wait for (repeatable). Default: idle and blocked.
         #[arg(long)]
         until: Vec<Status>,
-        /// JSON file of idle and blocked regexes (tmux and cmux).
+        /// JSON file of idle and blocked regexes (tmux, cmux, tuios).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },

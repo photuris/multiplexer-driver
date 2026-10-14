@@ -1,0 +1,3 @@
+The TUIOS daemon is not running, and no sessions are saved on disk.
+Most likely cause: no session has been started yet.
+Fix: run 'tuios new' to start a session, or 'tuios start-server' for a daemon with no session.

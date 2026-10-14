@@ -4,7 +4,7 @@ expression: "String::from_utf8_lossy(&output.stdout)"
 ---
 Report the agent status of a pane.
 
-Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs --patterns for a signal; cmux uses them only when the pane's agent reports no usable lifecycle; Herdr reports natively and ignores them.
+Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs --patterns for a signal; cmux and tuios use them only when the pane's agent reports no usable state; Herdr reports natively and ignores them.
 
 Example: multiplexer-driver --harness tmux pane status %1 --patterns patterns.json
 
@@ -22,14 +22,15 @@ Options:
           - tmux:  tmux
           - herdr: Herdr
           - cmux:  cmux (macOS)
+          - tuios: tuios
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
       --patterns <PATTERNS>
-          JSON file of idle and blocked regexes (tmux and cmux)
+          JSON file of idle and blocked regexes (tmux, cmux, tuios)
 
       --session <SESSION>
-          Harness server to use: a Herdr session name, a tmux -L socket name, or a cmux socket path. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, a cmux socket path, or a tuios session name. Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 

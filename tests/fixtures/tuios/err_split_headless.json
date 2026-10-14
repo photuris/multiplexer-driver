@@ -1,0 +1,4 @@
+{
+  "error": "split-window failed: FocusWindow changes what is drawn on screen, so it needs an attached client.\nMost likely cause: the daemon has no viewport, so it cannot compute a geometry nobody is displaying. Attach a client and retry.\nFix: run 'tuios attach probe'.",
+  "success": false
+}

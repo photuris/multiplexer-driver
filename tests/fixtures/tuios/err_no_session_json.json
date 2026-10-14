@@ -1,0 +1,4 @@
+{
+  "error": "list-windows failed: session nosuch not found.\nMost likely cause: the name matches no live session. A session that was killed is gone. One that was never started may still have saved state ('tuios resurrect').\nAvailable: probe.\nFix: run 'tuios ls'.",
+  "success": false
+}

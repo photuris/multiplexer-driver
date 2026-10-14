@@ -1,0 +1,21 @@
+{
+  "activity": "working",
+  "agent_session_id": "",
+  "agent_state_at": 1792012078324523300,
+  "blocked_by": "",
+  "confidence": "none",
+  "evidence_age_ms": 5,
+  "harness_id": "",
+  "identity": "",
+  "message": "",
+  "meta": {},
+  "needs_you": false,
+  "program_status": [],
+  "queued": 0,
+  "ready": false,
+  "source": "report",
+  "state": "working",
+  "subagents": 0,
+  "success": true,
+  "window_id": "b6f04787-b9c6-4a4b-ae3e-953d81ef5938"
+}

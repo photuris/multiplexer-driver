@@ -4,7 +4,7 @@ expression: "String::from_utf8_lossy(&output.stdout)"
 ---
 Wait until a pane reaches a status.
 
-Polls every 500 ms and prints the StatusResult that matched. Exits 7 on timeout. tmux requires --patterns; cmux uses them only when the pane's agent reports no usable lifecycle; Herdr ignores them.
+Polls every 500 ms and prints the StatusResult that matched. Exits 7 on timeout. tmux requires --patterns; cmux and tuios use them only when the pane's agent reports no usable state; Herdr ignores them.
 
 Example: multiplexer-driver --harness tmux pane wait %1 --timeout 5m --until idle --patterns patterns.json
 
@@ -22,6 +22,7 @@ Options:
           - tmux:  tmux
           - herdr: Herdr
           - cmux:  cmux (macOS)
+          - tuios: tuios
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
@@ -29,7 +30,7 @@ Options:
           Longest time to wait: an integer with ms, s, or m
 
       --session <SESSION>
-          Harness server to use: a Herdr session name, a tmux -L socket name, or a cmux socket path. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, a cmux socket path, or a tuios session name. Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 
@@ -42,7 +43,7 @@ Options:
           - blocked: The agent waits on a dialog or permission prompt
 
       --patterns <PATTERNS>
-          JSON file of idle and blocked regexes (tmux and cmux)
+          JSON file of idle and blocked regexes (tmux, cmux, tuios)
 
       --pretty
           Indent single-object output. Lists stay JSON Lines

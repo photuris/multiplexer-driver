@@ -1,0 +1,74 @@
+{
+  "current_workspace": 1,
+  "message": "command executed",
+  "order": null,
+  "success": true,
+  "workspaces": [
+    {
+      "current": true,
+      "focus_history": [
+        "6c412b04-95a3-4f1b-9786-8f2679c305b2"
+      ],
+      "focused_window_id": "6c412b04-95a3-4f1b-9786-8f2679c305b2",
+      "name": "",
+      "window_count": 1,
+      "workspace": 1
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 2
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 3
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 4
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 5
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 6
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 7
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 8
+    },
+    {
+      "current": false,
+      "focused_window_id": "",
+      "name": "",
+      "window_count": 0,
+      "workspace": 9
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+close-window failed: no window found matching "00000000-0000-0000-0000-000000000000".
+Most likely cause: the window target matched no window. A window is addressable by its id, a unique id prefix, the index list-windows prints, or its exact name.
+Available: 6c412b04-95a3-4f1b-9786-8f2679c305b2, b6f04787-b9c6-4a4b-ae3e-953d81ef5938, d1cd8209-1edd-483c-8d0f-1ea22657e810, e8182956-2753-4ceb-97e5-c5ffdc6b5cd4, joshua@omarchy:~/Projects/personal/multiplexer-driver, renamed, w2, w3.
+Fix: run 'tuios list-windows --json'.

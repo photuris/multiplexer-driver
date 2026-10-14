@@ -1,0 +1,4 @@
+{
+  "error": "split-window failed: tiling is not enabled; run EnableTiling before this command.\nMost likely cause: the daemon reported command_failed.",
+  "success": false
+}

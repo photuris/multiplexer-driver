@@ -1,0 +1,40 @@
+{
+  "agents": [
+    {
+      "agent_session_id": "abc123",
+      "agent_state_at": 1792012082133257500,
+      "blocked_by": "approval",
+      "completion_seq": 0,
+      "confidence": "certain",
+      "cwd": "/tmp",
+      "evidence_age_ms": 5,
+      "finished_unread": false,
+      "focused": false,
+      "foreground": "",
+      "group": "",
+      "harness_id": "claude-code",
+      "identity": "report",
+      "message": "approve Bash",
+      "meta": {},
+      "name": "renamed",
+      "needs_you": true,
+      "program_status": [],
+      "protocol": "",
+      "queued": 0,
+      "ready": false,
+      "session": "probe",
+      "source": "report",
+      "state": "needs_input",
+      "subagents": 0,
+      "unread": 0,
+      "window_id": "b6f04787-b9c6-4a4b-ae3e-953d81ef5938",
+      "workspace": 1
+    }
+  ],
+  "human_inbox": "human",
+  "human_unread": 0,
+  "message": "command executed",
+  "session": "probe",
+  "success": true,
+  "total": 1
+}
