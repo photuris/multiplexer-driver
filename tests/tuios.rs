@@ -13,7 +13,9 @@
 
 use std::{
     cell::RefCell,
-    env, fs, io,
+    env,
+    fs::{self, File},
+    io,
     os::unix::fs::PermissionsExt,
     panic::{self, AssertUnwindSafe},
     path::{Path, PathBuf},
@@ -233,6 +235,11 @@ impl Server {
         })
     }
 
+    /// The file that keeps the attached client's stdout and stderr.
+    fn client_log(&self) -> PathBuf {
+        self.dir.join("client.log")
+    }
+
     /// Attaches a client to the test session through `script`, which
     /// gives `tuios attach` the terminal it needs, and waits until the
     /// daemon reports it. Does nothing when one is attached already.
@@ -241,14 +248,19 @@ impl Server {
             return;
         }
 
+        let log = self.client_log();
+        let output = File::create(&log).expect("create the client log");
         let child = private_command("script", &self.dir)
             .args([
                 "-qec",
                 &format!("tuios attach {}", self.session),
                 "/dev/null",
             ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // tuios refuses to draw on `TERM=dumb`, which is what a
+            // noninteractive caller has.
+            .env("TERM", "xterm-256color")
+            .stdout(output.try_clone().expect("clone the client log"))
+            .stderr(output)
             .spawn()
             .expect("starting script for the attached client");
 
@@ -260,7 +272,9 @@ impl Server {
             assert!(
                 Instant::now() < deadline,
                 "script gave no working client: the session never showed \
-                 attached"
+                 attached; client output ({}): {}",
+                log.display(),
+                String::from_utf8_lossy(&fs::read(&log).unwrap_or_default())
             );
 
             thread::sleep(Duration::from_millis(100));
