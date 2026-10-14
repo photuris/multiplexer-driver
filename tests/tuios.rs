@@ -802,22 +802,27 @@ fn should_give_shell_when_split_command_is_empty(server: &Server) {
     close(&driver, &new);
 }
 
-/// A refusal because tiling is off is `unsupported` with tuios's text,
-/// and the driver does not try to enable tiling. A fake `tuios` first on
-/// `PATH` plays the daemon and logs every call.
-fn should_carry_text_as_unsupported_when_tiling_is_off(server: &Server) {
+/// Runs `run` with a fake `tuios` first on `PATH`. The fake appends its
+/// arguments to a log, prints `reply` and exits with `code`. Returns the
+/// result of `run` and the logged calls, one line each.
+fn with_fake_tuios<T>(
+    server: &Server,
+    reply: &str,
+    code: i32,
+    run: impl FnOnce() -> T,
+) -> (T, String) {
     let bin = server.dir.join("fake-bin");
     let log = server.dir.join("fake-calls.log");
-    let refusal = include_str!("fixtures/tuios/err_split_no_tiling.json");
 
     fs::create_dir_all(&bin).expect("create the fake bin directory");
-    fs::write(bin.join("refusal.json"), refusal).expect("write the refusal");
+    fs::write(bin.join("reply.json"), reply).expect("write the reply");
+    fs::write(&log, "").expect("reset the call log");
     fs::write(
         bin.join("tuios"),
         format!(
-            "#!/bin/sh\necho \"$@\" >> '{}'\ncat '{}'\nexit 1\n",
+            "#!/bin/sh\necho \"$@\" >> '{}'\ncat '{}'\nexit {code}\n",
             log.display(),
-            bin.join("refusal.json").display()
+            bin.join("reply.json").display()
         ),
     )
     .expect("write the fake tuios");
@@ -825,22 +830,34 @@ fn should_carry_text_as_unsupported_when_tiling_is_off(server: &Server) {
         .expect("chmod the fake tuios");
 
     let path = env::var_os("PATH").expect("PATH is set");
-    let fake_path = env::join_paths(
-        [bin.clone()].into_iter().chain(env::split_paths(&path)),
-    )
-    .expect("join PATH");
+    let fake_path =
+        env::join_paths([bin].into_iter().chain(env::split_paths(&path)))
+            .expect("join PATH");
 
     // SAFETY: no other thread of this process exists at this point; the
     // wait scenario joined its helper.
     unsafe { env::set_var("PATH", &fake_path) };
 
-    let result = split(&server.driver(), &server.root, "split-3", &[]);
+    let result = run();
 
     // SAFETY: as above.
     unsafe { env::set_var("PATH", &path) };
 
+    (
+        result,
+        fs::read_to_string(&log).expect("the fake tuios was run"),
+    )
+}
+
+/// A refusal because tiling is off is `unsupported` with tuios's text,
+/// and the driver does not try to enable tiling. A fake `tuios` plays the
+/// daemon and logs every call.
+fn should_carry_text_as_unsupported_when_tiling_is_off(server: &Server) {
+    let refusal = include_str!("fixtures/tuios/err_split_no_tiling.json");
+    let (result, calls) = with_fake_tuios(server, refusal, 1, || {
+        split(&server.driver(), &server.root, "split-3", &[])
+    });
     let err = result.expect_err("split must fail");
-    let calls = fs::read_to_string(&log).expect("the fake tuios was run");
 
     assert_eq!(err.kind(), "unsupported", "got {err:?}");
     assert!(
@@ -853,15 +870,17 @@ fn should_carry_text_as_unsupported_when_tiling_is_off(server: &Server) {
     assert!(calls.contains("split-window"), "calls: {calls}");
 }
 
-/// `raw` hands its arguments to tuios unchanged, session included.
+/// `raw` hands its arguments to tuios unchanged: the driver's own session
+/// is not injected. A fake `tuios` records the exact arguments.
 fn should_pass_args_through_when_raw(server: &Server) {
-    let out = server
-        .driver()
-        .raw(&argv(&["list-windows", "-s", &server.session, "--json"]))
-        .expect("raw");
-    let listed: Value = serde_json::from_str(&out).expect("JSON");
+    let (result, calls) = with_fake_tuios(server, "[]", 0, || {
+        server
+            .driver()
+            .raw(&argv(&["list-windows", "-s", FOREIGN, "--json"]))
+    });
 
-    assert_eq!(listed["windows"][0]["window_id"], server.root.0.as_str());
+    assert_eq!(result.expect("raw"), "[]");
+    assert_eq!(calls, format!("list-windows -s {FOREIGN} --json\n"));
 }
 
 /// A failing `raw` command is `unexpected`, never `not_found`.
