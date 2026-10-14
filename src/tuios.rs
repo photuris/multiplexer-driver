@@ -1111,7 +1111,8 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_list_only_used_and_current_workspaces() {
+        fn should_list_only_used_and_current_workspaces_when_slots_are_fixed()
+        {
             let records = workspace_records(&workspaces());
 
             assert_eq!(
@@ -1470,7 +1471,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_build_list_args_with_json() {
+        fn should_build_list_args_with_json_when_listing() {
             assert_eq!(
                 (
                     list_windows_args(),
@@ -1539,7 +1540,8 @@ mod tests {
         }
 
         #[test]
-        fn should_press_enter_and_ctrl_c_through_send_keys() {
+        fn should_press_enter_and_ctrl_c_through_send_keys_when_sending_keys()
+        {
             assert_eq!(
                 (send_enter_args("W"), interrupt_args("W")),
                 (
@@ -1563,7 +1565,7 @@ mod tests {
         }
 
         #[test]
-        fn should_close_workspace_by_number() {
+        fn should_close_workspace_by_number_when_given_a_number() {
             assert_eq!(
                 close_workspace_args("3"),
                 v(&["close-workspace", "3"])
