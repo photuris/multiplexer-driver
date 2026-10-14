@@ -1096,7 +1096,14 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(result.confidence, Confidence::Heuristic);
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (
+                    Status::Idle,
+                    Confidence::Heuristic,
+                    Some("/tmp ❯ ".to_string())
+                )
+            );
         }
     }
 
