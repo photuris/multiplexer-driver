@@ -2,7 +2,7 @@
 source: tests/cli.rs
 expression: "String::from_utf8_lossy(&output.stdout).replace(\"multiplexer-driver.exe\",\n\"multiplexer-driver\")"
 ---
-Drive tmux, Herdr, cmux, and tuios workspaces, panes, and coding agents.
+Drive tmux, Herdr, cmux, tuios, and hc workspaces, panes, and coding agents.
 
 stdout carries JSON (one object, or JSON Lines for lists). On failure the last stderr line is {"error":{"type":…,"message":…}}.
 

@@ -10,7 +10,7 @@ use crate::{
     model::{Direction, Status},
 };
 
-/// Drive tmux, Herdr, cmux, and tuios workspaces, panes, and coding agents.
+/// Drive tmux, Herdr, cmux, tuios, and hc workspaces, panes, and coding agents.
 ///
 /// stdout carries JSON (one object, or JSON Lines for lists). On failure
 /// the last stderr line is {"error":{"type":…,"message":…}}.
