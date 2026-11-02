@@ -1,0 +1,1 @@
+{"error":{"hint":"check the program name and cwd","kind":"spawn_failed","message":"cannot start \"nope\": No such file or directory (os error 2)"}}

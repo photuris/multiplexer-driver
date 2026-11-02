@@ -25,8 +25,8 @@ pub struct Cli {
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_HARNESS")]
     pub harness: Option<Harness>,
     /// Harness server to use: a Herdr session name, a tmux -L socket
-    /// name, a cmux socket path, or a tuios session name. Unset uses the
-    /// ambient server.
+    /// name, a cmux socket path, a tuios session name, or an hc session
+    /// name (`HC_SESSION`). Unset uses the ambient server.
     #[arg(long, global = true, env = "MULTIPLEXER_DRIVER_SESSION")]
     pub session: Option<String>,
     /// Indent single-object output. Lists stay JSON Lines.
@@ -220,8 +220,8 @@ pub enum PaneCommand {
     /// Report the agent status of a pane.
     ///
     /// Prints {"handle":…,"status":…,"confidence":…,"tail":…}. tmux needs
-    /// --patterns for a signal; cmux and tuios use them only when the
-    /// pane's agent reports no usable state; Herdr reports natively and
+    /// --patterns for a signal; cmux, tuios, and hc use them only when
+    /// the pane's agent reports no usable state; Herdr reports natively and
     /// ignores them.
     ///
     /// Example: multiplexer-driver --harness tmux pane status %1
@@ -229,15 +229,15 @@ pub enum PaneCommand {
     Status {
         /// Pane handle.
         handle: String,
-        /// JSON file of idle and blocked regexes (tmux, cmux, tuios).
+        /// JSON file of idle and blocked regexes (tmux, cmux, tuios, hc).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },
     /// Wait until a pane reaches a status.
     ///
     /// Polls every 500 ms and prints the StatusResult that matched. Exits
-    /// 7 on timeout. tmux requires --patterns; cmux and tuios use them
-    /// only when the pane's agent reports no usable state; Herdr ignores
+    /// 7 on timeout. tmux requires --patterns; cmux, tuios, and hc use
+    /// them only when the pane's agent reports no usable state; Herdr ignores
     /// them.
     ///
     /// Example: multiplexer-driver --harness tmux pane wait %1 --timeout
@@ -251,7 +251,7 @@ pub enum PaneCommand {
         /// Status to wait for (repeatable). Default: idle and blocked.
         #[arg(long)]
         until: Vec<Status>,
-        /// JSON file of idle and blocked regexes (tmux, cmux, tuios).
+        /// JSON file of idle and blocked regexes (tmux, cmux, tuios, hc).
         #[arg(long)]
         patterns: Option<PathBuf>,
     },

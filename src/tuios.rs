@@ -18,7 +18,7 @@ use crate::{
         AgentSession, Confidence, Direction, Handle, PaneRecord,
         SessionRefKind, Status, StatusResult, WorkspaceRecord,
     },
-    patterns::Patterns,
+    patterns::{Patterns, resolve_status},
     process::{CEILING, output_within},
     text::{shell_join, trim_trailing_blank_lines},
 };
@@ -219,9 +219,12 @@ impl Driver for Tuios {
     fn pane_status(&self, target: &Handle) -> Result<StatusResult> {
         let state: AgentState = self.run_json(&agent_state_args(&target.0))?;
 
-        resolve_status(target, &state.state, self.patterns.as_ref(), || {
-            read_text(&self.run(&capture_args(&target.0, 15, false))?)
-        })
+        resolve_status(
+            target,
+            map_state(&state.state),
+            self.patterns.as_ref(),
+            || read_text(&self.run(&capture_args(&target.0, 15, false))?),
+        )
     }
 
     /// Runs `tuios <args>` verbatim. The session is not injected,
@@ -338,45 +341,6 @@ fn map_state(raw: &str) -> Status {
         "idle" | "done" => Status::Idle,
         _ => Status::Unknown,
     }
-}
-
-/// Picks the status for `target`. A mappable agent `state` is native.
-/// Otherwise, with `patterns`, `read` supplies the screen text to
-/// classify; without them, nothing is read.
-fn resolve_status(
-    target: &Handle,
-    state: &str,
-    patterns: Option<&Patterns>,
-    read: impl FnOnce() -> Result<String>,
-) -> Result<StatusResult> {
-    let status = map_state(state);
-
-    if status != Status::Unknown {
-        return Ok(StatusResult {
-            handle: target.clone(),
-            status,
-            confidence: Confidence::Native,
-            tail: None,
-        });
-    }
-
-    let Some(patterns) = patterns else {
-        return Ok(StatusResult {
-            handle: target.clone(),
-            status: Status::Unknown,
-            confidence: Confidence::None,
-            tail: None,
-        });
-    };
-    let text = read()?;
-    let (status, confidence) = patterns.classify(&text);
-
-    Ok(StatusResult {
-        handle: target.clone(),
-        status,
-        confidence,
-        tail: Some(text),
-    })
 }
 
 /// `value` as `Some`, or `None` when it is empty.
@@ -719,8 +683,6 @@ struct Capture {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use rstest::rstest;
     use serde_json::json;
 
@@ -1024,86 +986,6 @@ mod tests {
             #[case] expected: Status,
         ) {
             assert_eq!(map_state(&state_fixture(state).state), expected);
-        }
-    }
-
-    mod resolve_status {
-        use super::*;
-
-        /// A patterns set whose idle regex matches a `❯` prompt.
-        fn patterns() -> Patterns {
-            Patterns::from_json(r#"{"idle":["❯ $"]}"#).unwrap()
-        }
-
-        /// A handle for the agent window.
-        fn target() -> Handle {
-            Handle(AGENT_WINDOW.into())
-        }
-
-        #[test]
-        fn should_be_native_when_agent_reported_state() {
-            let result = resolve_status(
-                &target(),
-                "needs_input",
-                Some(&patterns()),
-                || Err(Error::Unexpected("must not read".into())),
-            )
-            .unwrap();
-
-            assert_eq!(
-                (result.status, result.confidence, result.tail),
-                (Status::Blocked, Confidence::Native, None)
-            );
-        }
-
-        #[test]
-        fn should_classify_screen_when_state_none_and_patterns() {
-            let result =
-                resolve_status(&target(), "none", Some(&patterns()), || {
-                    Ok("hello\n/tmp ❯ ".into())
-                })
-                .unwrap();
-
-            assert_eq!(
-                (result.status, result.confidence, result.tail.is_some()),
-                (Status::Idle, Confidence::Heuristic, true)
-            );
-        }
-
-        #[test]
-        fn should_be_unknown_without_reading_when_no_patterns() {
-            let read = Cell::new(false);
-            let result = resolve_status(&target(), "none", None, || {
-                read.set(true);
-
-                Ok(String::new())
-            })
-            .unwrap();
-
-            assert_eq!(
-                (result.status, result.confidence, result.tail, read.get()),
-                (Status::Unknown, Confidence::None, None, false)
-            );
-        }
-
-        #[test]
-        fn should_classify_screen_when_state_unknown_and_patterns() {
-            let result = resolve_status(
-                &target(),
-                "unknown",
-                Some(&patterns()),
-                || Ok("/tmp ❯ ".into()),
-            )
-            .unwrap();
-
-            assert_eq!(
-                (result.status, result.confidence, result.tail),
-                (
-                    Status::Idle,
-                    Confidence::Heuristic,
-                    Some("/tmp ❯ ".to_string())
-                )
-            );
         }
     }
 

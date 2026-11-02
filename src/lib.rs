@@ -1,11 +1,12 @@
-//! Drive terminal multiplexer harnesses (tmux, Herdr, cmux, tuios) and the
-//! coding agents inside them through one vocabulary of workspaces, tabs,
-//! and panes. See the design spec in `docs/superpowers/specs/`.
+//! Drive terminal multiplexer harnesses (tmux, Herdr, cmux, tuios, hc) and
+//! the coding agents inside them through one vocabulary of workspaces,
+//! tabs, and panes. See the design spec in `docs/superpowers/specs/`.
 
 pub mod agents;
 pub mod cli;
 pub mod cmux;
 pub mod driver;
+pub mod hc;
 pub mod herdr;
 pub mod model;
 pub mod notify;
@@ -44,6 +45,8 @@ pub enum Harness {
     Cmux,
     /// tuios.
     Tuios,
+    /// Herdr desktop app core (hc).
+    Hc,
 }
 
 /// Builds the driver for `harness`.
@@ -63,6 +66,7 @@ pub fn driver_for(
         Harness::Herdr => Box::new(herdr::Herdr::new(session)),
         Harness::Cmux => Box::new(cmux::Cmux::new(session, patterns)),
         Harness::Tuios => Box::new(tuios::Tuios::new(session, patterns)),
+        Harness::Hc => Box::new(hc::Hc::new(session, patterns)),
     })
 }
 
@@ -101,11 +105,14 @@ pub fn run(cli: Cli, out: &mut dyn Write) -> Result<()> {
             let harness = cli
                 .harness
                 .ok_or_else(|| Error::Usage("--harness is required".into()))?;
-            // The patterns file is a tmux, cmux, and tuios concept; Herdr
-            // ignores it, even when it is missing or invalid.
+            // The patterns file is a tmux, cmux, tuios, and hc concept;
+            // Herdr ignores it, even when it is missing or invalid.
             let patterns = match (harness, patterns_path(&command)) {
                 (
-                    Harness::Tmux | Harness::Cmux | Harness::Tuios,
+                    Harness::Tmux
+                    | Harness::Cmux
+                    | Harness::Tuios
+                    | Harness::Hc,
                     Some(path),
                 ) => Some(Patterns::load(path)?),
                 _ => None,

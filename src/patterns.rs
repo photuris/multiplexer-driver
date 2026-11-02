@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::{
     driver::{Error, Result},
-    model::{Confidence, Status},
+    model::{Confidence, Handle, Status, StatusResult},
 };
 
 /// Compiled idle and blocked patterns. The default has none.
@@ -77,6 +77,48 @@ impl Patterns {
 
         (Status::Working, Confidence::Heuristic)
     }
+}
+
+/// Picks the status for `target`. A `status` other than
+/// [`Status::Unknown`] is native and `read` is never called. Otherwise,
+/// with `patterns`, `read` supplies the screen text to classify;
+/// without them, nothing is read.
+///
+/// # Errors
+///
+/// Any error from `read`.
+pub fn resolve_status(
+    target: &Handle,
+    status: Status,
+    patterns: Option<&Patterns>,
+    read: impl FnOnce() -> Result<String>,
+) -> Result<StatusResult> {
+    if status != Status::Unknown {
+        return Ok(StatusResult {
+            handle: target.clone(),
+            status,
+            confidence: Confidence::Native,
+            tail: None,
+        });
+    }
+
+    let Some(patterns) = patterns else {
+        return Ok(StatusResult {
+            handle: target.clone(),
+            status: Status::Unknown,
+            confidence: Confidence::None,
+            tail: None,
+        });
+    };
+    let text = read()?;
+    let (status, confidence) = patterns.classify(&text);
+
+    Ok(StatusResult {
+        handle: target.clone(),
+        status,
+        confidence,
+        tail: Some(text),
+    })
 }
 
 /// Compiles each source regex.
@@ -152,6 +194,168 @@ mod tests {
             let err = Patterns::from_json(r#"{"idle":["("]}"#).unwrap_err();
 
             assert!(matches!(err, Error::Usage(_)), "got {err:?}");
+        }
+    }
+
+    mod resolve_status {
+        use std::cell::Cell;
+
+        use super::*;
+
+        /// A patterns set whose idle regex matches a `❯` prompt.
+        fn patterns() -> Patterns {
+            Patterns::from_json(r#"{"idle":["❯ $"]}"#).unwrap()
+        }
+
+        /// A handle for the pane under test.
+        fn target() -> Handle {
+            Handle("t1".into())
+        }
+
+        #[test]
+        fn should_be_native_without_reading_when_status_known() {
+            let result = resolve_status(
+                &target(),
+                Status::Blocked,
+                Some(&patterns()),
+                || panic!("must not read"),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (Status::Blocked, Confidence::Native, None)
+            );
+        }
+
+        #[test]
+        fn should_be_native_when_status_known_and_no_patterns() {
+            let result =
+                resolve_status(&target(), Status::Working, None, || {
+                    panic!("must not read")
+                })
+                .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (Status::Working, Confidence::Native, None)
+            );
+        }
+
+        #[test]
+        fn should_be_unknown_without_reading_when_no_patterns() {
+            let read = Cell::new(false);
+            let result =
+                resolve_status(&target(), Status::Unknown, None, || {
+                    read.set(true);
+
+                    Ok(String::new())
+                })
+                .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail, read.get()),
+                (Status::Unknown, Confidence::None, None, false)
+            );
+        }
+
+        #[test]
+        fn should_classify_screen_when_unknown_and_patterns() {
+            let result = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&patterns()),
+                || Ok("/tmp ❯ ".into()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (
+                    Status::Idle,
+                    Confidence::Heuristic,
+                    Some("/tmp ❯ ".to_string())
+                )
+            );
+        }
+
+        #[test]
+        fn should_stay_unknown_with_tail_when_patterns_empty() {
+            let empty = Patterns::default();
+            let result = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&empty),
+                || Ok("anything".into()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (
+                    Status::Unknown,
+                    Confidence::None,
+                    Some("anything".to_string())
+                )
+            );
+        }
+
+        #[test]
+        fn should_be_blocked_when_idle_and_blocked_both_match() {
+            let both = Patterns::from_json(
+                r#"{"idle":["\\$\\s*$"],"blocked":["Trust this folder\\?"]}"#,
+            )
+            .unwrap();
+            let text = "Trust this folder?\n$ ";
+            let result = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&both),
+                || Ok(text.into()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (
+                    Status::Blocked,
+                    Confidence::Heuristic,
+                    Some(text.to_string())
+                )
+            );
+        }
+
+        #[test]
+        fn should_be_working_when_patterns_match_nothing() {
+            let result = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&patterns()),
+                || Ok("compiling".into()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (
+                    Status::Working,
+                    Confidence::Heuristic,
+                    Some("compiling".to_string())
+                )
+            );
+        }
+
+        #[test]
+        fn should_pass_read_error_through_when_patterns_set() {
+            let err = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&patterns()),
+                || Err(Error::Unexpected("read failed".into())),
+            )
+            .unwrap_err();
+
+            assert!(matches!(err, Error::Unexpected(m) if m == "read failed"));
         }
     }
 }
