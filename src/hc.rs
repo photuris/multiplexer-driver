@@ -730,6 +730,46 @@ mod tests {
         }
     }
 
+    mod spawn_error {
+        use super::*;
+
+        #[test]
+        fn should_say_not_installed_when_binary_missing() {
+            let err = spawn_error(&io::Error::from(ErrorKind::NotFound));
+
+            assert!(
+                matches!(&err, Error::HarnessUnavailable(m) if m == "hc is not installed"),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn should_say_timed_out_when_ceiling_passed() {
+            let err = spawn_error(&io::Error::new(
+                ErrorKind::TimedOut,
+                "no exit within 30s",
+            ));
+
+            assert!(
+                matches!(&err, Error::HarnessUnavailable(m) if m == "hc timed out: no exit within 30s"),
+                "got {err:?}"
+            );
+        }
+
+        #[test]
+        fn should_carry_the_io_error_when_spawn_fails_otherwise() {
+            let err = spawn_error(&io::Error::new(
+                ErrorKind::PermissionDenied,
+                "denied",
+            ));
+
+            assert!(
+                matches!(&err, Error::HarnessUnavailable(m) if m == "running hc: denied"),
+                "got {err:?}"
+            );
+        }
+    }
+
     mod run_args {
         use super::*;
 
@@ -900,11 +940,12 @@ mod tests {
         fn should_inherit_everything_when_no_session(
             #[case] session: Option<&str>,
         ) {
-            let env = child_env(session, &INHERITED);
+            let expected: Vec<(String, String)> = INHERITED
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
 
-            assert_eq!(env.len(), INHERITED.len());
-            assert!(env.contains(&("HC_SCOPE".to_string(), "s".to_string())));
-            assert!(!env.iter().any(|(k, _)| k == "HC_SESSION"));
+            assert_eq!(child_env(session, &INHERITED), expected);
         }
 
         #[test]

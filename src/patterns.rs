@@ -301,6 +301,23 @@ mod tests {
         }
 
         #[test]
+        fn should_keep_empty_tail_when_patterns_empty_and_screen_blank() {
+            let empty = Patterns::default();
+            let result = resolve_status(
+                &target(),
+                Status::Unknown,
+                Some(&empty),
+                || Ok(String::new()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                (result.status, result.confidence, result.tail),
+                (Status::Unknown, Confidence::None, Some(String::new()))
+            );
+        }
+
+        #[test]
         fn should_be_blocked_when_idle_and_blocked_both_match() {
             let both = Patterns::from_json(
                 r#"{"idle":["\\$\\s*$"],"blocked":["Trust this folder\\?"]}"#,
