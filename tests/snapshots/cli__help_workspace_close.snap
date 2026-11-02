@@ -1,6 +1,6 @@
 ---
 source: tests/cli.rs
-expression: "String::from_utf8_lossy(&output.stdout)"
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"multiplexer-driver.exe\",\n\"multiplexer-driver\")"
 ---
 Close a workspace and everything in it.
 
@@ -23,11 +23,12 @@ Options:
           - herdr: Herdr
           - cmux:  cmux (macOS)
           - tuios: tuios
+          - hc:    Herdr desktop app core (hc)
           
           [env: MULTIPLEXER_DRIVER_HARNESS=]
 
       --session <SESSION>
-          Harness server to use: a Herdr session name, a tmux -L socket name, a cmux socket path, or a tuios session name. Unset uses the ambient server
+          Harness server to use: a Herdr session name, a tmux -L socket name, a cmux socket path, a tuios session name, or an hc session name (`HC_SESSION`). Unset uses the ambient server
           
           [env: MULTIPLEXER_DRIVER_SESSION=]
 
