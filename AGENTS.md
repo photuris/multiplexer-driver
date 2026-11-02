@@ -1,7 +1,7 @@
 # AGENTS.md
 
-`multiplexer-driver` is a Rust CLI that drives tmux, Herdr, cmux, and tuios. See
-`README.md` for use. The design is in
+`multiplexer-driver` is a Rust CLI that drives tmux, Herdr, cmux, tuios,
+and hc. See `README.md` for use. The design is in
 `docs/superpowers/specs/2026-09-30-multiplexer-driver-design.md`.
 
 ## Conventions
@@ -100,4 +100,34 @@
   socket path limit rules out a deeper directory) and sets `TERM` for
   its own attached client, because tuios refuses `TERM=dumb`. It needs
   `script` and skips when `tuios` is missing.
+- hc handle = terminal address (`t7`), the stable id hc prints on spawn.
+  `--session` becomes `HC_SESSION`; with a session the driver also
+  removes every other `HC_*` variable from the child, so the caller's
+  own terminal context never leaks in.
+- hc has two names for a pane. `--name` is hc's unique name (1 to 32 of
+  `a-z 0-9 - _ .`); `md.label` is our label and always set. `pane
+  rename` changes only `md.label`, because hc cannot rename. hc rejects
+  id-shaped names (`t7`) with `invalid_params` in a shape it does not
+  document, so the driver retries the spawn without `--name` instead of
+  guessing the rule.
+- hc workspace = a herdr-app space id, stored as the `herdr.space`
+  label (the tab is `herdr.tab`, read only). `--workspace` is optional.
+  The driver only reads these labels.
+- hc `pane kill` is `hc kill` then `hc rm`. A terminal that already
+  finished makes `kill` fail with `finished`; the driver ignores that
+  and still removes it.
+- hc `pane split` and every `workspace` command are unsupported by
+  decision: the herdr app owns layout. `pane read --ansi` is
+  unsupported because hc keeps no escape codes.
+- hc status is native from the program's OSC 7501 report (`working`,
+  `idle`/`done`, `blocked`/`error`). A live terminal that reported
+  nothing falls back to `--patterns`, else `unknown`. `resolve_status`
+  now lives in `patterns.rs`, shared by tuios and hc.
+- hc `pane spawn` passes `--outlive-parent` so the terminal survives
+  the process that started it.
+- The hc integration test starts two private cores (the one under test
+  and a sentinel) with `HC_SESSION` and scratch `XDG_RUNTIME_DIR`,
+  `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` in `/tmp/hc.XXXXXX`. It
+  removes every `HC_*` variable first, so your own core (session
+  `default`) is never reached, and it skips when `hc` is missing.
 - Open item: tmux conversation IDs are not done (spec section 12).

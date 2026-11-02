@@ -1,8 +1,9 @@
 # multiplexer-driver
 
-`multiplexer-driver` is a command-line tool that controls tmux, Herdr, cmux, and tuios.
-It gives scripts and coding agents one set of commands for workspaces,
-panes, and the agents that run in them. Every result is JSON.
+`multiplexer-driver` is a command-line tool that controls tmux, Herdr,
+cmux, tuios, and hc. It gives scripts and coding agents one set of
+commands for workspaces, panes, and the agents that run in them. Every
+result is JSON.
 
 ## Install
 
@@ -76,8 +77,8 @@ Global flags:
 
 | Flag | Environment variable | Meaning |
 |---|---|---|
-| `--harness <tmux\|herdr\|cmux\|tuios>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
-| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name, a tmux `-L` socket name, a cmux socket path, or a tuios session name. |
+| `--harness <tmux\|herdr\|cmux\|tuios\|hc>` | `MULTIPLEXER_DRIVER_HARNESS` | Harness to drive. Required for `workspace`, `pane`, and `raw`. |
+| `--session <name>` | `MULTIPLEXER_DRIVER_SESSION` | A Herdr session name, a tmux `-L` socket name, a cmux socket path, a tuios session name, or an hc session name (`HC_SESSION`). |
 | `--pretty` | | Indent single-object output. Lists stay JSON Lines. |
 | `--log-level <level>` | `RUST_LOG` | `debug`, `info`, `warn` (default), or `error`. |
 
@@ -143,16 +144,35 @@ agent state. A pane with no reported state falls back to `--patterns`,
 else `unknown`. `raw` passes its arguments to `tuios` unchanged and
 does not add `-s`. The tuios driver is tested on Linux only.
 
+**hc.** `hc` is the core of the Herdr desktop app (tested with 0.1.17).
+It is separate from the `herdr` TUI harness above. A handle is an hc
+terminal address such as `t7`. `--session` is the core's session name,
+passed as `HC_SESSION`. `--name` becomes the hc name when it is 1 to 32
+characters of `a-z`, `0-9`, `-`, `_`, or `.` that start with a letter
+or digit. The label always goes in the `md.label` label, and
+`pane rename` changes only that label, never the hc name. hc rejects
+some names that fit this rule (an id shape such as `t7`) with
+`invalid_params`. The driver then retries the spawn without `--name`. A
+workspace is a Herdr app space id, written as the `herdr.space` label.
+`--workspace` is optional. Status is native when the program reports it
+over OSC 7501. A program that reports nothing falls back to
+`--patterns`, else `unknown`. `pane read --ansi`, `pane split`, and
+every `workspace` command are unsupported, because the app owns the
+layout. `pane kill` kills the terminal, then removes it. `pane spawn`
+passes `--outlive-parent`, so the terminal outlives the caller. `raw`
+passes its arguments to `hc` unchanged and applies `--session`.
+
 ## Windows
 
-Windows supports Herdr only. tmux does not run natively on Windows, so
-`--harness tmux` fails with `harness_unavailable`. `pane run` quotes
-non-agent commands for PowerShell panes. A pane that runs `cmd.exe` will
-not parse them. The quoting rejects an argument that is empty, contains
-a double quote, or ends with a backslash, because Windows PowerShell 5.1
-mangles them. Run `docs/windows-smoke.ps1` inside Herdr to check an
-install. cmux runs on macOS only, so `--harness cmux` fails with
-`harness_unavailable` on other systems.
+Windows supports Herdr and hc only. tmux does not run natively on
+Windows, so `--harness tmux` fails with `harness_unavailable`. `pane
+run` quotes non-agent commands for PowerShell panes. A pane that runs
+`cmd.exe` will not parse them. The quoting rejects an argument that is
+empty, contains a double quote, or ends with a backslash, because
+Windows PowerShell 5.1 mangles them. The hc driver passes argv to `hc`
+and does no PowerShell quoting. Run `docs/windows-smoke.ps1` inside
+Herdr to check an install. cmux runs on macOS only, so `--harness cmux`
+fails with `harness_unavailable` on other systems.
 
 ## PowerShell
 
@@ -191,7 +211,9 @@ workspaces that it created. It skips unless `cmux ping` answers. The
 tuios integration test starts its own daemon in a private directory
 (`/tmp/tp.XXXXXX`), never touches yours, and removes the directory. It
 needs `script` (util-linux) to attach a client for the split scenarios,
-and it skips when `tuios` is not installed.
+and it skips when `tuios` is not installed. The hc integration test
+starts a private core in `/tmp/hc.XXXXXX`, never touches your own core,
+and removes the directory. It skips when `hc` is not installed.
 
 ## License
 

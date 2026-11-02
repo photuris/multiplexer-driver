@@ -1,9 +1,9 @@
 [package]
 name = "multiplexer-driver"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.98"
-description = "Drive tmux, Herdr, cmux, and tuios workspaces, panes, and coding agents from one JSON CLI"
+description = "Drive tmux, Herdr, cmux, tuios, and hc workspaces, panes, and coding agents from one JSON CLI"
 license = "MIT"
 repository = "https://github.com/photuris/multiplexer-driver"
 homepage = "https://github.com/photuris/multiplexer-driver"
