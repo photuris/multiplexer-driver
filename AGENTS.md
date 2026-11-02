@@ -105,14 +105,15 @@ and hc. See `README.md` for use. The design is in
   removes every other `HC_*` variable from the child, so the caller's
   own terminal context never leaks in.
 - hc has two names for a pane. `--name` is hc's unique name (1 to 32 of
-  `a-z 0-9 - _ .`); `md.label` is our label and always set. `pane
-  rename` changes only `md.label`, because hc cannot rename. hc rejects
-  id-shaped names (`t7`) with `invalid_params` in a shape it does not
-  document, so the driver retries the spawn without `--name` instead of
-  guessing the rule.
+  `a-z 0-9 - _ .`, starting with a letter or digit); `md.label` is our
+  label and always set. `pane rename` changes only `md.label`, because
+  hc cannot rename. hc rejects id-shaped names (`t7`) with
+  `invalid_params` in a shape it does not document, so the driver
+  retries the spawn without `--name` instead of guessing the rule.
 - hc workspace = a herdr-app space id, stored as the `herdr.space`
-  label (the tab is `herdr.tab`, read only). `--workspace` is optional.
-  The driver only reads these labels.
+  label. `pane spawn --workspace` writes it; `--workspace` is optional.
+  The driver reads `herdr.space` for the workspace and `herdr.tab` for
+  the tab, and never writes `herdr.tab`.
 - hc `pane kill` is `hc kill` then `hc rm`. A terminal that already
   finished makes `kill` fail with `finished`; the driver ignores that
   and still removes it.
